@@ -1,20 +1,21 @@
+# Based on https://github.com/aws/deep-learning-containers/blob/master/pytorch/training/docker/2.7/py3/cu128/Dockerfile.gpu
 ARG PYTHON=python3
 ARG PYTHON_VERSION=3.12.10
-ARG PYTORCH_VERSION=2.8.0
+ARG PYTORCH_VERSION=2.7.1
 ARG TORCHTNT_VERSION=0.2.4
-ARG TORCHAUDIO_VERSION=2.8.0
-ARG TORCHVISION_VERSION=0.23.0
+ARG TORCHAUDIO_VERSION=2.7.1
+ARG TORCHVISION_VERSION=0.22.1
 ARG TORCHDATA_VERSION=0.11.0
 ARG GDRCOPY_VERSION=2.5
 ARG TE_VERSION=2.3
-#[DISABLED] ARG FLASH_ATTN_VERSION=2.7.4.post1
-ARG FLASH_ATTN_VERSION=2.8.2
-#[DISABLED] FROM public.ecr.aws/deep-learning-containers/base:12.8.0-gpu-py312-ubuntu22.04-ec2 AS common
-FROM public.ecr.aws/deep-learning-containers/base:12.8.0-gpu-py312-ubuntu22.04-ec2
+ARG FLASH_ATTN_VERSION=2.7.4.post1
 
-#[DISABLED] LABEL maintainer="Amazon AI"
-#[DISABLED] LABEL dlc_major_version="1"
-# has EFA PYTHON and CUDA 12.8
+FROM public.ecr.aws/deep-learning-containers/base:12.8.0-gpu-py312-ubuntu22.04-ec2 AS common
+# base has EFA, PYTHON and CUDA 12.8
+
+
+LABEL maintainer="Amazon AI"
+LABEL dlc_major_version="1"
 # This arg required to stop docker build waiting for region configuration while installing tz data from ubuntu 20
 ARG PYTORCH_VERSION
 ARG TORCHDATA_VERSION
@@ -31,7 +32,7 @@ ENV PATH="${CUDA_HOME}/bin:${PATH}"
 ENV EFA_PATH="/opt/amazon/efa"
 ENV OPEN_MPI_PATH="/opt/amazon/openmpi"
 
-# Python won't try to write .pyc or .pyo files on the import of source modules
+# Python won’t try to write .pyc or .pyo files on the import of source modules
 # Force stdin, stdout and stderr to be totally unbuffered. Good for logging
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -41,7 +42,7 @@ ENV LC_ALL=C.UTF-8
 
 ENV TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 
-#[DISABLED] ENV DLC_CONTAINER_TYPE=training
+ENV DLC_CONTAINER_TYPE=training
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
 ENV LD_LIBRARY_PATH="/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
@@ -55,13 +56,13 @@ WORKDIR /
 
 #[DISABLED] COPY bash_telemetry.sh /usr/local/bin/bash_telemetry.sh
 #[DISABLED] RUN chmod +x /usr/local/bin/bash_telemetry.sh \
-#[DISABLED]  && echo 'source /usr/local/bin/bash_telemetry.sh' >> /etc/bash.bashrc
+#[DISABLED] && echo 'source /usr/local/bin/bash_telemetry.sh' >> /etc/bash.bashrc
 
 RUN pip install --no-cache-dir \
     numpy \
     "setuptools>=75.0.0"  \
     ninja \
-#[DISABLED]     cython \
+    cython \
     pybind11 \
     mkl \
     mkl-include
@@ -97,16 +98,16 @@ RUN pip install --no-cache-dir git+https://github.com/NVIDIA/TransformerEngine.g
 
 RUN apt-get update \
  && apt-get install -y --allow-change-held-packages --no-install-recommends \
-#[DISABLED]     libgl1-mesa-glx \
+    libgl1-mesa-glx \
     build-essential \
     ca-certificates \
     zlib1g-dev \
     openssl \
     python3-dev \
     pkg-config \
-#[DISABLED]     check \
+    check \
     curl \
-#[DISABLED]     emacs \
+    tree \
     git \
     jq \
     unzip \
@@ -115,132 +116,131 @@ RUN apt-get update \
 && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
-#[DISABLED]     cryptography \
-#[DISABLED]     pyOpenSSL \
-#[DISABLED]     parso \
-#[DISABLED]     typing \
-#[DISABLED]     charset-normalizer \
+    cryptography \
+    pyOpenSSL \
+    parso \
+    typing \
+    charset-normalizer \
     packaging \
-#[DISABLED]     "boto3>=1.40.14" \
+    "boto3>=1.40.14" \
     PyYAML \
-#[DISABLED]     scipy \
-#[DISABLED]     click \
+    scipy \
+    click \
     psutil \
-#[DISABLED]     ipython \
-#[DISABLED]     ipykernel \
+    ipython \
+    ipykernel \
     "pillow>=12.1.1" \
-#[DISABLED]     h5py \
+    h5py \
     "fsspec>=2025.7.0" \
-#[DISABLED]     "markupsafe>=3.0.2" \
-#[DISABLED]     mpi4py \
-#[DISABLED]     s3torchconnector \
-#[DISABLED]     accelerate \
-#[DISABLED]     "idna>=3.7" \
+    "markupsafe>=3.0.2" \
+    mpi4py \
+    s3torchconnector \
+    accelerate \
+    "idna>=3.7" \
     "tqdm>=4.66.3" \
     "requests>=2.32.0" \
-#[DISABLED]     "urllib3>=2.5.0" \
-#[DISABLED]     "pyasn1>=0.6.2" \
-#[DISABLED]     "wheel>=0.46.2" \
-#[DISABLED]     pytz \
-#[DISABLED]     tzdata \
-#[DISABLED]     "awscli>=1.42.14,<2" \
-#[DISABLED]     # opencv-python 4.12.0.88 reuqires numpy<2.3.0, which is not compatible with previous prod image(2.3.1)
-#[DISABLED]     "opencv-python==4.11.0.86" \
-#[DISABLED]     "tornado>=6.5.1" \
-#[DISABLED]     "fastai==2.8.2" \
-#[DISABLED]     # pin numpy requirement for fastai dependency
-#[DISABLED]     # requires explicit declaration of spacy, thic, blis, typer, langcodes, language_data
-#[DISABLED]     spacy \
-#[DISABLED]     #thinc 8.3.6 is not compatible with numpy 1.26.4 (sagemaker doesn't support latest numpy)
-#[DISABLED]     "thinc==8.3.4" \
-#[DISABLED]     blis \
-#[DISABLED]     typer \
-#[DISABLED]     langcodes \
-#[DISABLED]     language_data \
-#[DISABLED]     "jinja2>=3.1.6"\
+    "urllib3>=2.5.0" \
+    "pyasn1>=0.6.2" \
+    "wheel>=0.46.2" \
+    pytz \
+    tzdata \
+    "awscli>=1.42.14,<2" \
+    # opencv-python 4.12.0.88 reuqires numpy<2.3.0, which is not compatible with previous prod image(2.3.1)
+    "opencv-python==4.11.0.86" \
+    "tornado>=6.5.1" \
+    "fastai==2.8.2" \
+    # pin numpy requirement for fastai dependency
+    # requires explicit declaration of spacy, thic, blis, typer, langcodes, language_data
+    spacy \
+    #thinc 8.3.6 is not compatible with numpy 1.26.4 (sagemaker doesn't support latest numpy)
+    "thinc==8.3.4" \
+    blis \
+    typer \
+    langcodes \
+    language_data \
+    "jinja2>=3.1.6"\
     "typing-extensions>=4.14.1" \
-    "filelock>=3.20.1"
-#[DISABLED]  && pip uninstall -y dataclasses
+    "filelock>=3.20.1" \
+ && pip uninstall -y dataclasses
 
 # Removing the cache as it is needed for security verification
 RUN rm -rf /root/.cache | true
-#[DISABLED] FROM common AS ec2
-#[DISABLED]
-#[DISABLED] ARG PYTHON
-#[DISABLED] ARG PYTHON_VERSION
-#[DISABLED]
+FROM common AS ec2
+
+ARG PYTHON
+ARG PYTHON_VERSION
+
 #[DISABLED] COPY dockerd_entrypoint.sh /usr/local/bin/dockerd_entrypoint.sh
 #[DISABLED] RUN chmod +x /usr/local/bin/dockerd_entrypoint.sh
-#[DISABLED]
-#[DISABLED] RUN apt-get update \
-#[DISABLED]  && apt-get upgrade -y \
-#[DISABLED]  && apt-get autoremove -y \
-#[DISABLED]  && apt-get clean \
-#[DISABLED]  && rm -rf /var/lib/apt/lists/*
-#[DISABLED]
-#[DISABLED] COPY setup_oss_compliance.sh setup_oss_compliance.sh
+
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && apt-get autoremove -y \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
+#[DISABLED] COPY build_artifacts/setup_oss_compliance.sh setup_oss_compliance.sh
 #[DISABLED] RUN bash setup_oss_compliance.sh ${PYTHON} && rm setup_oss_compliance.sh
-#[DISABLED]
-#[DISABLED] # Removing the cache as it is needed for security verification
-#[DISABLED] RUN rm -rf /root/.cache | true
-#[DISABLED]
+
+# Removing the cache as it is needed for security verification
+RUN rm -rf /root/.cache | true
+
 #[DISABLED] ENTRYPOINT ["bash", "-m", "dockerd_entrypoint.sh"]
-#[DISABLED] CMD ["/bin/bash"]
-#[DISABLED]
-#[DISABLED] FROM common AS sagemaker
-#[DISABLED] LABEL maintainer="Amazon AI"
-#[DISABLED] LABEL dlc_major_version="1"
-#[DISABLED]
+CMD ["/bin/bash"]
+
+FROM common AS sagemaker
+LABEL maintainer="Amazon AI"
+LABEL dlc_major_version="1"
+
 #[DISABLED] ENV SAGEMAKER_TRAINING_MODULE=sagemaker_pytorch_container.training:main
-#[DISABLED]
-#[DISABLED] ARG PYTHON
-#[DISABLED] ARG PYTHON_VERSION
-#[DISABLED]
-#[DISABLED] WORKDIR /
-#[DISABLED]
+
+ARG PYTHON
+ARG PYTHON_VERSION
+
+WORKDIR /
+
 #[DISABLED] # Copy workaround script for incorrect hostname
 #[DISABLED] COPY changehostname.c /
 #[DISABLED] COPY start_with_right_hostname.sh /usr/local/bin/start_with_right_hostname.sh
 #[DISABLED] RUN chmod +x /usr/local/bin/start_with_right_hostname.sh
-#[DISABLED]
+
 #[DISABLED] # Install SM packages
-#[DISABLED] RUN pip install --no-cache-dir -U \
-#[DISABLED]     # address package regression caused by smclarify depedency s3fs"
-#[DISABLED]     awscli \
-#[DISABLED]     boto3 \
-#[DISABLED]     smclarify \
-#[DISABLED]     "sagemaker>=2.9.0,<3" \
-#[DISABLED]     "sagemaker-experiments<1" \
-#[DISABLED]     sagemaker-pytorch-training \
-#[DISABLED]     sagemaker-training \
-#[DISABLED]     sniffio
-#[DISABLED]
-#[DISABLED] # Install extra packages
-#[DISABLED] RUN pip install --no-cache-dir -U \
-#[DISABLED]     bokeh \
-#[DISABLED]     imageio \
-#[DISABLED]     numba \
-#[DISABLED]     pandas \
-#[DISABLED]     plotly \
-#[DISABLED]     shap \
-#[DISABLED]     scikit-learn \
-#[DISABLED]     seaborn \
-#[DISABLED]     # pinned for sagemaker==2.233.0
-#[DISABLED]     cloudpickle
-#[DISABLED]
-#[DISABLED] RUN apt-get update \
-#[DISABLED]  && apt-get upgrade -y \
-#[DISABLED]  && apt-get autoremove -y \
-#[DISABLED]  && apt-get clean \
-#[DISABLED]  && rm -rf /var/lib/apt/lists/*
-#[DISABLED]
+RUN pip install --no-cache-dir -U \
+    # address package regression caused by smclarify depedency s3fs"
+    awscli \
+    boto3 \
+    #[DISABLED] smclarify \
+    #[DISABLED] "sagemaker>=2.9.0,<3" \
+    #[DISABLED] "sagemaker-experiments<1" \
+    #[DISABLED] sagemaker-pytorch-training \
+    #[DISABLED] sagemaker-training \
+    sniffio
+
+# Install extra packages
+RUN pip install --no-cache-dir -U \
+    bokeh \
+    imageio \
+    numba \
+    pandas \
+    plotly \
+    shap \
+    scikit-learn \
+    seaborn \
+    # pinned for sagemaker==2.233.0
+    cloudpickle
+
+RUN apt-get update \
+ && apt-get upgrade -y \
+ && apt-get autoremove -y \
+ && apt-get clean \
+ && rm -rf /var/lib/apt/lists/*
+
 #[DISABLED] COPY setup_oss_compliance.sh setup_oss_compliance.sh
 #[DISABLED] RUN bash setup_oss_compliance.sh ${PYTHON} && rm setup_oss_compliance.sh
-#[DISABLED]
-#[DISABLED] # Removing the cache as it is needed for security verification
-#[DISABLED] RUN rm -rf /root/.cache | true
-#[DISABLED]
-#[DISABLED] ENTRYPOINT ["bash", "-m", "start_with_right_hostname.sh"]
-#[DISABLED] CMD ["/bin/bash"]
 
-CMD ["/bin/bash"]
+# Removing the cache as it is needed for security verification
+RUN rm -rf /root/.cache | true
+
+#[DISABLED] ENTRYPOINT ["bash", "-m", "start_with_right_hostname.sh"]
+
+RUN pip install --no-cache-dir hyperpod-elastic-agent

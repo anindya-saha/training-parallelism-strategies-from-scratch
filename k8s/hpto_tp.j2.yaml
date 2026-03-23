@@ -3,20 +3,19 @@ kind: HyperPodPyTorchJob
 metadata:
   name: {{ JOB_NAME }}
   namespace: {{ NAMESPACE }}
-  annotations:
-    description: "From-scratch TP training via HyperPod Training Operator"
 spec:
   nprocPerNode: "{{ NPROC_PER_NODE | default('8') }}"
 
   replicaSpecs:
     - name: pods
       replicas: {{ NUM_NODES | default('1') }}
+      spares: 0
       template:
         metadata:
           labels:
             job-name: {{ JOB_NAME }}
             replica-type: pods
-            app: tp-training
+            app: tp-experiments
         spec:
           nodeSelector:
             beta.kubernetes.io/instance-type: {{ INSTANCE_TYPE }}
@@ -61,6 +60,10 @@ spec:
             - name: fsx-static
               persistentVolumeClaim:
                 claimName: {{ FSX_CLAIM | default('fsx-static-claim') }}
+            - name: host-nvme-storage
+              hostPath:
+                path: /opt/dlami/nvme
+                type: Directory
           containers:
             - name: pytorch
               image: {{ IMAGE_URI }}
@@ -68,10 +71,10 @@ spec:
               resources:
                 requests:
                   nvidia.com/gpu: "{{ GPUS_PER_NODE | default('8') }}"
-                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE | default('4') }}"
+                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE | default('16') }}"
                 limits:
                   nvidia.com/gpu: "{{ GPUS_PER_NODE | default('8') }}"
-                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE | default('4') }}"
+                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE | default('16') }}"
               env:
                 - name: LOGLEVEL
                   value: INFO
@@ -81,6 +84,8 @@ spec:
                   value: "1"
                 - name: NCCL_SOCKET_IFNAME
                   value: ^lo
+                - name: GLOO_SOCKET_IFNAME
+                  value: eth0
                 - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
                   value: "1"
                 - name: TORCH_NCCL_ENABLE_MONITORING
@@ -90,9 +95,11 @@ spec:
                 - name: TORCH_NCCL_DUMP_ON_TIMEOUT
                   value: "1"
                 - name: TORCH_NCCL_DEBUG_INFO_TEMP_FILE
-                  value: /local/nccl_trace_rank_
+                  value: /tmp/nccl_trace_rank_
                 - name: PYTORCH_CUDA_ALLOC_CONF
                   value: "expandable_segments:True"
+                - name: PYTHONFAULTHANDLER
+                  value: "1"
                 - name: FI_EFA_USE_DEVICE_RDMA
                   value: "1"
                 - name: FI_EFA_FORK_SAFE
@@ -109,29 +116,17 @@ spec:
                 - "--log_dir=/tmp/hyperpod"
                 - "--nproc_per_node={{ NPROC_PER_NODE | default('8') }}"
                 - "--nnodes={{ NUM_NODES | default('1') }}"
-{%- if TRAIN_SCRIPT is defined %}
+                - "--server-log-level=warning"
                 - "{{ TRAIN_SCRIPT }}"
-{%- else %}
-                - "/workspace/tensor-parallelism/train_tp.py"
-{%- endif %}
-{%- if USE_LARGE is defined and USE_LARGE %}
-                - "--large"
-{%- endif %}
-{%- if USE_SP is defined and USE_SP %}
-                - "--sp"
-{%- endif %}
-                - "--steps={{ STEPS | default('500') }}"
-                - "--lr={{ LR | default('3e-4') }}"
-                - "--log-interval={{ LOG_INTERVAL | default('10') }}"
-                - "--ckpt-interval={{ CKPT_INTERVAL | default('50') }}"
-                - "--ckpt-dir={{ CKPT_DIR | default('/mnt/fsx/checkpoints') }}"
               volumeMounts:
                 - name: shmem
                   mountPath: /dev/shm
                 - name: local-nvme
-                  mountPath: /local
+                  mountPath: /tmp
                 - name: fsx-static
                   mountPath: /mnt/fsx
+                - name: host-nvme-storage
+                  mountPath: /opt/dlami/nvme
               securityContext:
                 capabilities:
                   add:
@@ -149,16 +144,6 @@ spec:
                 failureThreshold: 10
 
   runPolicy:
-    jobMaxRetryCount: 3
-    restartPolicy:
-      numRestartBeforeFullJobRestart: 2
-      evalPeriodSeconds: 21600
-      maxFullJobRestarts: 1
     cleanPodPolicy: All
-    logMonitoringConfiguration:
-      - name: JobStart
-        logPattern: ".*loss.*"
-        expectedStartCutOffInSeconds: 300
-      - name: JobHangingDetection
-        logPattern: ".*loss.*"
-        expectedRecurringFrequencyInSeconds: 600
+    jobMaxRetryCount: 0
+    ttlSecondsAfterFinished: 0

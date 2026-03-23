@@ -1,0 +1,7 @@
+FROM mlp.docker.zooxlabs.com/asaha/dist-train/cuda-12.9-pytorch-2.8-py3.12:1.0.0-rc1
+
+WORKDIR /workspace/training-parallelism-strategies-from-scratch
+
+COPY tensor-parallelism/src/*.py tensor-parallelism/
+
+CMD ["python", "tensor-parallelism/test_model.py"]
