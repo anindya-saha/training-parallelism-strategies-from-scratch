@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from utils import count_parameters, get_gpu_memory_mb, get_gpu_peak_memory_mb
+
 
 # ---------------------------------------------------------------------------
 # Model constants
@@ -28,28 +30,9 @@ SEQ_LEN = 256
 NUM_WARMUP = 3
 NUM_BENCHMARK = 10
 
-
 # ---------------------------------------------------------------------------
-# Utilities
+# Standard Multi-Head Attention
 # ---------------------------------------------------------------------------
-
-
-def count_parameters(model: nn.Module) -> int:
-    return sum(p.numel() for p in model.parameters())
-
-
-def get_gpu_memory_mb(device=0) -> float:
-    return torch.cuda.memory_allocated(device) / 1024 / 1024
-
-
-def get_gpu_peak_memory_mb(device=0) -> float:
-    return torch.cuda.max_memory_allocated(device) / 1024 / 1024
-
-
-# ---------------------------------------------------------------------------
-# Model components
-# ---------------------------------------------------------------------------
-
 
 class StandardAttention(nn.Module):
     def __init__(self, d_model: int, n_heads: int):
@@ -88,6 +71,10 @@ class StandardFFN(nn.Module):
         return self.W2(F.gelu(self.W1(x)))
 
 
+# ---------------------------------------------------------------------------
+# GPT Transformer Block
+# ---------------------------------------------------------------------------
+
 class StandardTransformerBlock(nn.Module):
     def __init__(self, d_model: int, n_heads: int, d_ff: int):
         super().__init__()
@@ -101,6 +88,10 @@ class StandardTransformerBlock(nn.Module):
         x = x + self.ffn(self.ln2(x))
         return x
 
+
+# ---------------------------------------------------------------------------
+# Full GPT Model
+# ---------------------------------------------------------------------------
 
 class StandardGPT(nn.Module):
     def __init__(self):
