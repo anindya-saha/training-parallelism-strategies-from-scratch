@@ -1,9 +1,9 @@
 # Parallelism Strategies for Training Large Language Models
 
-Understanding scaling LLM training from one GPU to hundreds - with concrete code, hand-drawn diagrams, and reproducible benchmarks.
+Understanding scaling LLM training - with concrete code, hand-drawn diagrams, and reproducible benchmarks.
 
 > Inspired by the [Ultra-Scale Playbook](https://huggingface.co/spaces/nanotron/ultra-scale-playbook)
-> by Hugging Face. Rewritten from scratch with original implementations,
+> by Hugging Face. Rewritten based on the HF blog with original implementations,
 > diagrams, and numerical walkthroughs.
 
 ---
@@ -382,16 +382,16 @@ a single node, fast NVLink interconnects keep overhead low. Going across nodes
 requires slower network connections and throughput drops significantly.
 
 
+### Running the TP Tests
+
+```bash
+torchrun --nproc_per_node=2 tensor-parallelism/src/tp_primitives.py
+```
+
 ### Sequence Parallelism
 
 TODO
 
-
-### Running the TP Tests
-
-```bash
-torchrun --nproc_per_node=2 tensor-parallelism/src/test_tp_primitives.py
-```
 
 
 ---
