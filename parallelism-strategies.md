@@ -79,12 +79,9 @@ When a model is too large for a single GPU, we split its weight matrices across 
 
 Tensor Parallelism leverages two fundamental properties of matrix multiplication $A \cdot B$:
 
-$$
-\begin{aligned}
-&\text{1. Column split:} \quad A \cdot B = A \cdot \begin{bmatrix} B_1 & B_2 & \cdots \end{bmatrix} = \begin{bmatrix} AB_1 & AB_2 & \cdots \end{bmatrix} \\
-&\text{2. Row split:} \quad A \cdot B = \begin{bmatrix} A_1 & A_2 & \cdots \end{bmatrix} \begin{bmatrix} B_1 \\ B_2 \\ \vdots \end{bmatrix} = \sum_{i=1}^n A_i B_i
-\end{aligned}
-$$
+$$\text{1. Column split:} \quad A \cdot B = A \cdot \begin{bmatrix} B_1 & B_2 & \cdots \end{bmatrix} = \begin{bmatrix} AB_1 & AB_2 & \cdots \end{bmatrix}$$
+
+$$\text{2. Row split:} \quad A \cdot B = \begin{bmatrix} A_1 & A_2 & \cdots \end{bmatrix} \begin{bmatrix} B_1 \\\\ B_2 \\\\ \vdots \end{bmatrix} = \sum_{i=1}^n A_i B_i$$
 
 We can compute a matrix product by either (1) multiplying each column of $B$ individually, or (2) multiplying each row individually and summing the results. Choosing column vs. row sharding requires different communication primitives.
 
@@ -97,21 +94,11 @@ We walk through TP step by step using concrete matrices on 2 GPUs: first Column-
 
 Every example uses the same input matrix $X$ and two weight matrices $W^1$ and $W^2$:
 
-$$
-X = \begin{bmatrix} 0 & 1 \\ 2 & 3 \\ 4 & 5 \\ 6 & 7 \end{bmatrix}_{4 \times 2}
-\quad
-W^1 = \begin{bmatrix} 1 & 3 \\ 2 & 4 \end{bmatrix}_{2 \times 2}
-\quad
-W^2 = \begin{bmatrix} 5 & 7 \\ 6 & 8 \end{bmatrix}_{2 \times 2}
-$$
+$$X = \begin{bmatrix} 0 & 1 \\\\ 2 & 3 \\\\ 4 & 5 \\\\ 6 & 7 \end{bmatrix}_{4 \times 2} \quad W^1 = \begin{bmatrix} 1 & 3 \\\\ 2 & 4 \end{bmatrix}_{2 \times 2} \quad W^2 = \begin{bmatrix} 5 & 7 \\\\ 6 & 8 \end{bmatrix}_{2 \times 2}$$
 
 On a single GPU:
 
-$$
-Y_1 = X \cdot W^1 = \begin{bmatrix} 2 & 4 \\ 8 & 18 \\ 14 & 32 \\ 20 & 46 \end{bmatrix}
-\qquad
-Y = Y_1 \cdot W^2 = \begin{bmatrix} 34 & 46 \\ 148 & 200 \\ 262 & 354 \\ 376 & 508 \end{bmatrix}
-$$
+$$Y_1 = X \cdot W^1 = \begin{bmatrix} 2 & 4 \\\\ 8 & 18 \\\\ 14 & 32 \\\\ 20 & 46 \end{bmatrix} \qquad Y = Y_1 \cdot W^2 = \begin{bmatrix} 34 & 46 \\\\ 148 & 200 \\\\ 262 & 354 \\\\ 376 & 508 \end{bmatrix}$$
 
 Our goal: get the same results when the weights are split across 2 GPUs.
 
@@ -217,28 +204,16 @@ class _AllGatherFromParallelRegion(torch.autograd.Function):
 
 $W^1$ is $(2,2)$. We split it by columns into two $(2,1)$ shards:
 
-$$
-\text{GPU 0: } W^1_0 = \begin{bmatrix} 1 \\ 2 \end{bmatrix}
-\qquad
-\text{GPU 1: } W^1_1 = \begin{bmatrix} 3 \\ 4 \end{bmatrix}
-$$
+$$\text{GPU 0: } W^1_0 = \begin{bmatrix} 1 \\\\ 2 \end{bmatrix} \qquad \text{GPU 1: } W^1_1 = \begin{bmatrix} 3 \\\\ 4 \end{bmatrix}$$
 
 Each GPU computes its local output:
 
-$$
-\text{GPU 0: } X \cdot W^1_0 = \begin{bmatrix} 2 \\ 8 \\ 14 \\ 20 \end{bmatrix}_{4 \times 1}
-\qquad
-\text{GPU 1: } X \cdot W^1_1 = \begin{bmatrix} 4 \\ 18 \\ 32 \\ 46 \end{bmatrix}_{4 \times 1}
-$$
+$$\text{GPU 0: } X \cdot W^1_0 = \begin{bmatrix} 2 \\\\ 8 \\\\ 14 \\\\ 20 \end{bmatrix}_{4 \times 1} \qquad \text{GPU 1: } X \cdot W^1_1 = \begin{bmatrix} 4 \\\\ 18 \\\\ 32 \\\\ 46 \end{bmatrix}_{4 \times 1}$$
 
 Each GPU holds one column of $Y$. To reconstruct the full $(4,2)$ result, we **all-gather** the outputs:
 
-$$
-Y_{\text{full}} = \begin{bmatrix} 2 & 4 \\ 8 & 18 \\ 14 & 32 \\ 20 & 46 \end{bmatrix}
-= X \cdot W^1
-$$
+$$Y_{\text{full}} = \begin{bmatrix} 2 & 4 \\\\ 8 & 18 \\\\ 14 & 32 \\\\ 20 & 46 \end{bmatrix} = X \cdot W^1$$
 
-![Col Linear Primitives](tensor-parallelism/images/tp-col-prim.png)
 
 <details>
 <summary>Code: Column-Parallel Linear test</summary>
@@ -259,6 +234,8 @@ def test_column_linear(self):
 
 </details>
 
+![Col Linear Primitives](tensor-parallelism/images/tp-col-prim.png)
+
 
 ### Row-Parallel Linear
 
@@ -268,37 +245,19 @@ def test_column_linear(self):
 
 $W^2$ is $(2,2)$. We split it by rows into two $(1,2)$ shards:
 
-$$
-\text{GPU 0: } W^2_0 = \begin{bmatrix} 5 & 7 \end{bmatrix}
-\qquad
-\text{GPU 1: } W^2_1 = \begin{bmatrix} 6 & 8 \end{bmatrix}
-$$
+$$\text{GPU 0: } W^2_0 = \begin{bmatrix} 5 & 7 \end{bmatrix} \qquad \text{GPU 1: } W^2_1 = \begin{bmatrix} 6 & 8 \end{bmatrix}$$
 
 $X$ must also be split -- each GPU gets one column:
 
-$$
-\text{GPU 0: } X_0 = \begin{bmatrix} 0 \\ 2 \\ 4 \\ 6 \end{bmatrix}_{4 \times 1}
-\qquad
-\text{GPU 1: } X_1 = \begin{bmatrix} 1 \\ 3 \\ 5 \\ 7 \end{bmatrix}_{4 \times 1}
-$$
+$$\text{GPU 0: } X_0 = \begin{bmatrix} 0 \\\\ 2 \\\\ 4 \\\\ 6 \end{bmatrix}_{4 \times 1} \qquad \text{GPU 1: } X_1 = \begin{bmatrix} 1 \\\\ 3 \\\\ 5 \\\\ 7 \end{bmatrix}_{4 \times 1}$$
 
 Each GPU computes a *partial result*:
 
-$$
-\text{GPU 0: } X_0 \cdot W^2_0 = \begin{bmatrix} 0 & 0 \\ 10 & 14 \\ 20 & 28 \\ 30 & 42 \end{bmatrix}_{4 \times 2}
-\qquad
-\text{GPU 1: } X_1 \cdot W^2_1 = \begin{bmatrix} 6 & 8 \\ 18 & 24 \\ 30 & 40 \\ 42 & 56 \end{bmatrix}_{4 \times 2}
-$$
+$$\text{GPU 0: } X_0 \cdot W^2_0 = \begin{bmatrix} 0 & 0 \\\\ 10 & 14 \\\\ 20 & 28 \\\\ 30 & 42 \end{bmatrix}_{4 \times 2} \qquad \text{GPU 1: } X_1 \cdot W^2_1 = \begin{bmatrix} 6 & 8 \\\\ 18 & 24 \\\\ 30 & 40 \\\\ 42 & 56 \end{bmatrix}_{4 \times 2}$$
 
 These are partial sums. To get the full $Y$, we **all-reduce** (sum across GPUs):
 
-$$
-Y_{\text{full}} = \begin{bmatrix} 0{+}6 & 0{+}8 \\ 10{+}18 & 14{+}24 \\ 20{+}30 & 28{+}40 \\ 30{+}42 & 42{+}56 \end{bmatrix}
-= \begin{bmatrix} 6 & 8 \\ 28 & 38 \\ 50 & 68 \\ 72 & 98 \end{bmatrix}
-= X \cdot W^2
-$$
-
-![Row Linear Primitives](tensor-parallelism/images/tp-row-prim.png)
+$$Y_{\text{full}} = \begin{bmatrix} 0{+}6 & 0{+}8 \\\\ 10{+}18 & 14{+}24 \\\\ 20{+}30 & 28{+}40 \\\\ 30{+}42 & 42{+}56 \end{bmatrix} = \begin{bmatrix} 6 & 8 \\\\ 28 & 38 \\\\ 50 & 68 \\\\ 72 & 98 \end{bmatrix} = X \cdot W^2$$
 
 <details>
 <summary>Code: Row-Parallel Linear test</summary>
@@ -317,6 +276,8 @@ def test_row_linear(self):
 
 </details>
 
+![Row Linear Primitives](tensor-parallelism/images/tp-row-prim.png)
+
 
 ### Column Parallel + Row Prallel Combined: The Cancellation
 
@@ -330,11 +291,7 @@ If used standalone, the all-gather after Column Linear and the scatter before Ro
 
 The final all-reduce produces the correct result:
 
-$$
-Y = \begin{bmatrix} 10{+}24 & 14{+}32 \\ 40{+}108 & 56{+}144 \\ 70{+}192 & 98{+}256 \\ 100{+}276 & 140{+}368 \end{bmatrix}
-= \begin{bmatrix} 34 & 46 \\ 148 & 200 \\ 262 & 354 \\ 376 & 508 \end{bmatrix}
-= X \cdot W^1 \cdot W^2
-$$
+$$Y = \begin{bmatrix} 10{+}24 & 14{+}32 \\\\ 40{+}108 & 56{+}144 \\\\ 70{+}192 & 98{+}256 \\\\ 100{+}276 & 140{+}368 \end{bmatrix} = \begin{bmatrix} 34 & 46 \\\\ 148 & 200 \\\\ 262 & 354 \\\\ 376 & 508 \end{bmatrix} = X \cdot W^1 \cdot W^2$$
 
 <details>
 <summary>Code: Column + Row combined test</summary>
