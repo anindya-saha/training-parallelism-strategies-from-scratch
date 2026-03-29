@@ -113,7 +113,7 @@ Y_1 = X \cdot W^1 = \begin{bmatrix} 2 & 4 \\ 8 & 18 \\ 14 & 32 \\ 20 & 46 \end{b
 Y = Y_1 \cdot W^2 = \begin{bmatrix} 34 & 46 \\ 148 & 200 \\ 262 & 354 \\ 376 & 508 \end{bmatrix}
 ```
 
-Our goal: get the same results when the weights are split across 2 GPUs.
+**Goal:** get the same results when the weights are split across 2 GPUs.
 
 
 ### The Autograd Primitives
@@ -215,6 +215,9 @@ class _AllGatherFromParallelRegion(torch.autograd.Function):
 
 ![Column Linear](tensor-parallelism/images/tp-column.png)
 
+<details>
+<summary>Click to expand to see how the Matrix calculation works out</summary>
+
 $W^1$ is $(2,2)$. We split it by columns into two $(2,1)$ shards:
 
 ```math
@@ -238,9 +241,12 @@ Y_{\text{full}} = \begin{bmatrix} 2 & 4 \\ 8 & 18 \\ 14 & 32 \\ 20 & 46 \end{bma
 = X \cdot W^1
 ```
 
+</details>
+
+<br>
 
 <details>
-<summary>Code: Column-Parallel Linear test</summary>
+<summary>Code: Column-Parallel Linear test (Click to expand)</summary>
 
 ```python
 def test_column_linear(self):
@@ -266,6 +272,9 @@ def test_column_linear(self):
 **Key idea:** Split $W$ by *rows*. Each GPU holds a horizontal slice. The *input* must also be split - each GPU gets the columns of $X$ that align with its rows of $W$. The outputs are *partial sums* that must be added together.
 
 ![Row Linear](tensor-parallelism/images/tp-row.png)
+
+<details>
+<summary>Click to expand to see how the Matrix calculation works out</summary>
 
 $W^2$ is $(2,2)$. We split it by rows into two $(1,2)$ shards:
 
@@ -299,8 +308,12 @@ Y_{\text{full}} = \begin{bmatrix} 0{+}6 & 0{+}8 \\ 10{+}18 & 14{+}24 \\ 20{+}30 
 = X \cdot W^2
 ```
 
+</details>
+
+<br>
+
 <details>
-<summary>Code: Row-Parallel Linear test</summary>
+<summary>Code: Row-Parallel Linear test (Click to expand)</summary>
 
 ```python
 def test_row_linear(self):
@@ -323,9 +336,8 @@ def test_row_linear(self):
 
 In an MLP block, $W^1$ is Column-Parallel and $W^2$ is Row-Parallel. When chained, **a full communication round disappears**.
 
-![Tensor Parallelism with Column + Row Linear](tensor-parallelism/images/tp-col-row.png)
-
-If used standalone, the all-gather after Column Linear and the scatter before Row Linear sit back-to-back. They are *conjugate* operations - one undoes the other. The column output is already in the form that row input needs.
+If used standalone, the all-gather after Column Linear and the scatter before Row Linear sit back-to-back. They are *conjugate* operations - one undoes the other. 
+The column output is already in the form that row input needs.
 
 **One all-reduce per forward pass. One all-reduce per backward pass.** That is all the communication a two-layer MLP needs.
 
@@ -338,7 +350,7 @@ Y = \begin{bmatrix} 10{+}24 & 14{+}32 \\ 40{+}108 & 56{+}144 \\ 70{+}192 & 98{+}
 ```
 
 <details>
-<summary>Code: Column + Row combined test</summary>
+<summary>Code: Column + Row combined test (Click to expand)</summary>
 
 ```python
 def test_column_then_row(self):
@@ -361,6 +373,8 @@ def test_column_then_row(self):
 ```
 
 </details>
+
+![Tensor Parallelism with Column + Row Linear](tensor-parallelism/images/tp-col-row-prim.png)
 
 
 ### Tensor Parallelism in a Transformer Block
@@ -402,13 +416,78 @@ flowchart LR
     style Reduce2 fill:#cfc,stroke:#090
 ```
 
-For multi-head attention, column parallelism has a natural interpretation: each GPU computes attention for a subset of heads. This works equally well for Multi-Query Attention (MQA) and Grouped Query Attention (GQA), where K/V heads are shared between queries. The TP degree should not exceed the number of K/V heads - otherwise heads must be duplicated across GPUs with additional sync.
+For multi-head attention, column parallelism has a natural interpretation: each GPU computes attention for a subset of heads. This works equally well 
+for **Multi-Query Attention (MQA)** and **Grouped Query Attention (GQA)**, where K/V heads are shared between queries. The TP degree should not exceed 
+the number of K/V heads - otherwise heads must be duplicated across GPUs with additional sync. How this actually works depends on the variant: MHA, GQA, or MQA.
 
-TODO: Implement Tp benchmarks and TP for Multi-Query Attention (MQA) and Grouped Query Attention (GQA)
+> From [HF: Ultrascale Playbook](https://huggingface.co/spaces/nanotron/ultrascale-playbook?section=tensor_parallelism_in_a_transformer_block):
+It's worth noting, however, that the tensor parallelism degree should not exceed the number of attention heads because we shard the QKV projection along 
+the `num_attention_heads` dimension. When using Grouped Query Attention (GQA), we have $num_attention_heads$ query heads but only $num_kv_heads$ key/value 
+heads (with $num_attention_heads >= num_kv_heads$. In this case, we can still set $TP=num_attention_heads$ , but we'll need to ensure that the K/V heads 
+stay properly synchronized across GPUs. For instance, Llama-3 8B has 32 query heads but only 8 key/value heads, so while the TP degree could theoretically 
+go up to 32, we would need careful implementation to maintain K/V head synchronization across the tensor-parallel workers.
 
-TODO: diagram for full transformer block TP, TP scaling graphs
 
-<!-- TODO: implement Tp benchmarks and TP for Multi-Query Attention (MQA) and Grouped Query Attention (GQA)  -->
+See [tensor-parallelism/src/model_llama_tp.py](tensor-parallelism/src/model_llama_tp.py) for LLama with Grouped Query Attention (GQA) + TP.  
+See [tensor-parallelism/src/model_gpt_tp.py](tensor-parallelism/src/model_gpt_tp.py) for GPT with Multi Head Attention (MHA) + TP.
+
+
+#### Attention Variants: MHA vs GQA vs MQA
+
+| | MHA (GPT) | GQA (Llama) | MQA |
+|---|---|---|---|
+| **Q heads** | `n_heads` | `n_heads` | `n_heads` |
+| **KV heads** | `n_heads` | `n_kv_heads` (between 1 and n_heads) | 1 |
+| **group_size** | 1 | `n_heads / n_kv_heads` | `n_heads` |
+| **W_q shape** | `[d_model, d_model]` | `[d_model, n_heads * d_head]` | `[d_model, n_heads * d_head]` |
+| **W_k, W_v shape** | `[d_model, d_model]` | `[d_model, n_kv_heads * d_head]` | `[d_model, d_head]` |
+| **KV cache size** | `n_heads * d_head * seq_len` | `n_kv_heads * d_head * seq_len` | `d_head * seq_len` |
+| **TP constraint** | `n_heads % ws == 0` | `n_heads % ws == 0` AND `n_kv_heads % ws == 0` | `ws == 1` (or replicate KV) |
+| **Implementation** | `model_gpt_tp.py` | `model_llama_tp.py` | Not implemented (see below) |
+
+**Key differences in the TP implementations:**
+
+In **MHA** (GPT), all projection matrices have the same shape. Every head - $Q$, $K$, and $V$ -
+is sharded identically across GPUs:
+
+```python
+# MHA: all projections are d_model -> d_model, symmetric sharding
+self.W_q = ColumnParallelLinear(d_model, d_model)
+self.W_k = ColumnParallelLinear(d_model, d_model)
+self.W_v = ColumnParallelLinear(d_model, d_model)
+self.W_o = RowParallelLinear(d_model, d_model)
+
+# Each GPU gets n_heads/ws heads for Q, K, and V
+Q = self.W_q(x).view(B, T, self.n_heads_local, self.d_head)
+K = self.W_k(x).view(B, T, self.n_heads_local, self.d_head)
+V = self.W_v(x).view(B, T, self.n_heads_local, self.d_head)
+```
+
+In **GQA** (Llama), $K/V$ projections are smaller because fewer KV heads are used.
+Each GPU gets a proportional subset of both $Q$ and $KV$ heads, and locally expands
+$KV$ heads to match $Q$ heads via `repeat_interleave` (no communication needed):
+
+```python
+# GQA: K/V projections are smaller -- asymmetric sharding
+self.W_q = ColumnParallelLinear(d_model, n_heads * d_head)      # shards Q heads
+self.W_k = ColumnParallelLinear(d_model, n_kv_heads * d_head)   # shards KV heads
+self.W_v = ColumnParallelLinear(d_model, n_kv_heads * d_head)   # shards KV heads
+self.W_o = RowParallelLinear(n_heads * d_head, d_model)
+
+# Each GPU gets n_kv_heads/ws KV heads, then expands locally
+K = self.W_k(x).view(B, T, self.n_kv_heads_local, self.d_head)
+V = self.W_v(x).view(B, T, self.n_kv_heads_local, self.d_head)
+K = K.repeat_interleave(self.group_size, dim=1)  # local expansion, no comm
+V = V.repeat_interleave(self.group_size, dim=1)
+```
+
+**MQA** is the extreme case of GQA with `n_kv_heads = 1`. Since we cannot split 
+1 head across multiple GPUs, `n_kv_heads % ws == 0` fails for any `ws > 1`.
+Real implementations handle this by replicating the single $KV$ head on every rank
+(the $KV$ weights are tiny: `d_model x d_head`), which means $W_k$ and $W_v$ become
+regular `nn.Linear` instead of `ColumnParallelLinear`. In practice, GQA with
+`n_kv_heads >= ws` was introduced precisely as the TP-friendly generalization
+of MQA - it gives the same KV-cache savings while remaining cleanly divisible.
 
 <!-- TODO: diagram for full transformer block TP, TP scaling graphs -->
 
@@ -426,11 +505,9 @@ a single node, fast NVLink interconnects keep overhead low. Going across nodes
 requires slower network connections and throughput drops significantly.
 
 
-### Running the TP Tests
+### Running Tests and Benchmarks
 
-```bash
-torchrun --nproc_per_node=2 tensor-parallelism/src/tp_primitives.py
-```
+See [developer.md](developer.md) for setup, CLI flags, benchmark commands, and Kubernetes deployment.
 
 ### Sequence Parallelism
 

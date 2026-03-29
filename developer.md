@@ -159,6 +159,84 @@ kubectl describe hyperpodpytorchjob <job-name> -n mlp
 kubectl delete hyperpodpytorchjob <job-name> -n mlp
 ```
 
+## Benchmarks
+
+### Single GPU (no parallelism)
+
+```bash
+# GPT baseline
+python tensor-parallelism/src/model_gpt.py
+
+# Llama baseline
+python tensor-parallelism/src/model_llama.py
+
+# Custom model size (GPT example)
+python tensor-parallelism/src/model_gpt.py --d-model 1024 --n-heads 16 --d-ff 4096 --n-layers 12
+
+# Custom model size (Llama example -- note n_kv_heads for GQA)
+python tensor-parallelism/src/model_llama.py --d-model 1024 --n-heads 16 --n-kv-heads 4 --n-layers 12
+
+# Custom benchmark settings
+python tensor-parallelism/src/model_gpt.py --batch-size 16 --seq-len 512 --warmup 5 --benchmark 20
+```
+
+Results are written to `results_model_gpt.json` / `results_model_llama.json`.
+
+### Tensor parallelism
+
+```bash
+# GPT TP on 4 GPUs
+torchrun --nproc_per_node=4 tensor-parallelism/src/model_gpt_tp.py
+
+# Llama TP on 4 GPUs
+torchrun --nproc_per_node=4 tensor-parallelism/src/model_llama_tp.py
+
+# 8 GPUs with larger model (GPT)
+torchrun --nproc_per_node=8 tensor-parallelism/src/model_gpt_tp.py \
+    --d-model 1024 --n-heads 16 --d-ff 4096 --n-layers 12
+
+# 8 GPUs with larger model (Llama -- n_kv_heads must be divisible by nproc)
+torchrun --nproc_per_node=8 tensor-parallelism/src/model_llama_tp.py \
+    --d-model 1024 --n-heads 16 --n-kv-heads 8 --n-layers 12
+```
+
+Results are written to `results_model_gpt_tp.json` / `results_model_llama_tp.json`.
+
+### TP primitives test
+
+```bash
+torchrun --nproc_per_node=2 tensor-parallelism/src/tp_primitives.py
+```
+
+### On Kubernetes (via HyperPodPyTorchJob)
+
+```bash
+# GPT single-GPU baseline on p5en
+./scripts/run_hpto_job.sh --skip-build \
+    --job-name bench-gpt-baseline \
+    --node-type p5en \
+    --train-script /workspace/training-parallelism-strategies-from-scratch/tensor-parallelism/src/model_gpt.py
+
+# GPT TP benchmark on p5en (8x H200)
+./scripts/run_hpto_job.sh --skip-build \
+    --job-name bench-gpt-tp \
+    --node-type p5en \
+    --train-script /workspace/training-parallelism-strategies-from-scratch/tensor-parallelism/src/model_gpt_tp.py
+
+# Llama single-GPU baseline on p5en
+./scripts/run_hpto_job.sh --skip-build \
+    --job-name bench-llama-baseline \
+    --node-type p5en \
+    --train-script /workspace/training-parallelism-strategies-from-scratch/tensor-parallelism/src/model_llama.py
+
+# Llama TP benchmark on p5en (8x H200)
+./scripts/run_hpto_job.sh --skip-build \
+    --job-name bench-llama-tp \
+    --node-type p5en \
+    --train-script /workspace/training-parallelism-strategies-from-scratch/tensor-parallelism/src/model_llama_tp.py
+```
+
+
 ## References
 
 - [Megatron-LM paper](https://arxiv.org/abs/1909.08053) -- original TP formulation
