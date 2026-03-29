@@ -175,7 +175,7 @@ def main():
 
     args = parse_args()
 
-    device = torch.device("cuda")
+    device = torch.device("cuda:0")
     torch.cuda.set_device(device)
     torch.cuda.reset_peak_memory_stats(device)
     torch.manual_seed(42)
@@ -249,7 +249,7 @@ def main():
         vocab_size=args.vocab_size,
         batch_size=args.batch_size,
         seq_len=args.seq_len,
-        params=n_params,
+        params_per_gpu=n_params,
         mem_model_mb=round(mem_model, 2),
         mem_peak_mb=round(peak, 2),
         fwd_ms=round(average(fwd_t) * 1000, 3),
@@ -264,7 +264,7 @@ def main():
     logger.info("  Model GPT - No parallelism - 1 GPU")
     logger.info("=" * 60)
     for k in [
-        "params",
+        "params_per_gpu",
         "mem_model_mb",
         "mem_peak_mb",
         "fwd_ms",

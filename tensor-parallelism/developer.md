@@ -49,13 +49,31 @@ used by Llama 3, Qwen 2.5, and other modern LLMs.
 
 ```bash
 # 1. Baseline (single GPU)
-python benchmark_baseline.py
+# 1.1. GPT
+python3 model_gpt.py
+
+# 1.2 Llama
+python3 model_llama.py
 
 # 2. TP with 2 GPUs
-torchrun --nproc_per_node=2 benchmark_tp.py
+# 2.1. GPT + TP with 2 GPUs
+torchrun --nproc_per_node=2 model_gpt_tp.py
 
-# 3. Compare
-python compare_results.py
+# 2.1. Llama + TP with 2 GPUs
+torchrun --nproc_per_node=2 model_llama_tp.py
+
+# 3. Compare results between baseline and tp versions
+python3 compare_results.py --model gpt
+python3 compare_results.py --model llama
+
+For comparing visually pass --plot to create a plot saved locally.
+
+# 4. Visualizing the weight splits between baseline and tp versions
+torchrun --nproc_per_node=2  inspect_splits.py --model gpt
+torchrun --nproc_per_node=2  inspect_splits.py --model llama
+
+# 5. measure All_reduce Overhead
+torchrun --nproc_per_node=2  measure_allreduce.py
 
 # 4. TP + Sequence Parallelism
 torchrun --nproc_per_node=2 benchmark_tp.py --sp
