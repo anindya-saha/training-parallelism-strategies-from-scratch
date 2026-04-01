@@ -14,21 +14,22 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TEMPLATE_FILE="${PROJECT_DIR}/k8s/hpto_tp.j2.yaml"
+TEMPLATE_FILE="${PROJECT_DIR}/k8s/hpto_job.j2.yaml"
 DRY_RUN=false
 SKIP_BUILD=false
 
 # -- Defaults -----------------------------------------------------------------
+# Load your dev.env (REGISTRY, NAMESPACE, HF_TOKEN, etc.) before launching
+# this script so the variables below pick up your overrides.
 
-REGISTRY=mlp.docker.acme.com
+REGISTRY="${REGISTRY:?Set REGISTRY in your dev.env}"
 EXPERIMENT_REPO="${REGISTRY}/${CURRENT_USER}/dist-train/experiments"
 
-NAMESPACE=mlp
-SERVICE_ACCOUNT=mlp-sa
-NPROC_PER_NODE=8
+NAMESPACE="${NAMESPACE:-mlp}"
+SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-mlp-sa}"
+FSX_CLAIM="${FSX_CLAIM:-fsx-static-claim}"
 NUM_NODES=1
-GPUS_PER_NODE=8
-EFA_PER_NODE=""
+GPU_PER_NODE=8
 
 declare -A NODE_PRESETS=(
   [p4d]="ml.p4d.24xlarge"
@@ -37,7 +38,14 @@ declare -A NODE_PRESETS=(
   [p6]="ml.p6-b200.48xlarge"
 )
 
-declare -A EFA_PRESETS=(
+declare -A GPU_TOTAL_PRESETS=(
+  [p4d]=8
+  [p4de]=8
+  [p5en]=8
+  [p6]=8
+)
+
+declare -A EFA_TOTAL_PRESETS=(
   [p4d]=4
   [p4de]=4
   [p5en]=16
@@ -60,13 +68,18 @@ Required:
                             /workspace/training-parallelism-strategies-from-scratch/tensor-parallelism/test_model.py)
 
 Optional:
-  --num-nodes NUM           Number of nodes (default: 1)
-  --nproc-per-node NUM      Processes per node (default: 8)
-  --gpus-per-node NUM       GPUs to request per node (default: 8)
-  --efa-per-node NUM        EFA adapters to request (default: auto from node type)
+  --num-nodes NUM           Number of nodes / pods (default: 1)
+  --gpus-per-node NUM       GPUs per node, also sets nproc_per_node (default: 8)
+                            EFA adapters are always set to the node's full
+                            allocation (e.g. 16 for p5en, 4 for p4d)
 
   --namespace NS            Kubernetes namespace (default: mlp)
   --service-account SA      Service account (default: mlp-sa)
+
+  --model-id ID             (unused) Kept for backward compatibility.
+                            Use run_model_download.sh instead.
+  --train-args "ARGS"       Extra arguments passed to the train script
+                            (e.g. "--tp-size 4 --max-new-tokens 64")
 
   --skip-build              Skip Docker build (reuse existing image)
   --image-uri URI           Use a specific image URI (implies --skip-build)
@@ -101,6 +114,8 @@ EOF
 # -- Parse args ---------------------------------------------------------------
 
 TRAIN_SCRIPT=""
+TRAIN_ARGS=""
+MODEL_ID=""
 IMAGE_URI=""
 
 while [[ $# -gt 0 ]]; do
@@ -108,10 +123,10 @@ while [[ $# -gt 0 ]]; do
     --job-name)         JOB_NAME="$2"; shift 2 ;;
     --node-type)        NODE_TYPE_INPUT="$2"; shift 2 ;;
     --train-script)     TRAIN_SCRIPT="$2"; shift 2 ;;
+    --train-args)       TRAIN_ARGS="$2"; shift 2 ;;
+    --model-id)         MODEL_ID="$2"; shift 2 ;;
     --num-nodes)        NUM_NODES="$2"; shift 2 ;;
-    --nproc-per-node)   NPROC_PER_NODE="$2"; shift 2 ;;
-    --gpus-per-node)    GPUS_PER_NODE="$2"; shift 2 ;;
-    --efa-per-node)     EFA_PER_NODE="$2"; shift 2 ;;
+    --gpus-per-node)    GPU_PER_NODE="$2"; shift 2 ;;
     --namespace)        NAMESPACE="$2"; shift 2 ;;
     --service-account)  SERVICE_ACCOUNT="$2"; shift 2 ;;
     --image-uri)        IMAGE_URI="$2"; SKIP_BUILD=true; shift 2 ;;
@@ -139,13 +154,17 @@ if [[ -z "${TRAIN_SCRIPT}" ]]; then
   usage
 fi
 
-INSTANCE_TYPE="${NODE_PRESETS[$NODE_TYPE_INPUT]:-$NODE_TYPE_INPUT}"
-
-if [[ -z "${EFA_PER_NODE}" ]]; then
-  EFA_PER_NODE="${EFA_PRESETS[$NODE_TYPE_INPUT]:-16}"
+INSTANCE_TYPE="${NODE_PRESETS[$NODE_TYPE_INPUT]:-}"
+if [[ -z "${INSTANCE_TYPE}" ]]; then
+  echo "Error: unknown node type '${NODE_TYPE_INPUT}'. Valid presets: ${!NODE_PRESETS[*]}"
+  exit 1
 fi
 
-echo "==> Config: ${INSTANCE_TYPE}, ${GPUS_PER_NODE} GPUs, ${EFA_PER_NODE} EFA, ${NPROC_PER_NODE} procs/node, ${NUM_NODES} node(s)"
+GPU_TOTAL="${GPU_TOTAL_PRESETS[$NODE_TYPE_INPUT]}"
+EFA_TOTAL="${EFA_TOTAL_PRESETS[$NODE_TYPE_INPUT]}"
+EFA_PER_NODE=$(( EFA_TOTAL * GPU_PER_NODE / GPU_TOTAL ))
+
+echo "==> Config: ${INSTANCE_TYPE}, ${GPU_PER_NODE} GPUs/node, ${EFA_PER_NODE} EFA/node, ${NUM_NODES} node(s)"
 
 # -- Docker build & push ------------------------------------------------------
 
@@ -172,10 +191,14 @@ read -r -d '' CONTEXT_JSON <<EOF || true
   "INSTANCE_TYPE": "${INSTANCE_TYPE}",
   "IMAGE_URI": "${IMAGE_URI}",
   "TRAIN_SCRIPT": "${TRAIN_SCRIPT}",
+  "TRAIN_ARGS": "${TRAIN_ARGS}",
+  "MODEL_ID": "${MODEL_ID}",
   "NUM_NODES": ${NUM_NODES},
-  "NPROC_PER_NODE": "${NPROC_PER_NODE}",
-  "GPUS_PER_NODE": "${GPUS_PER_NODE}",
-  "EFA_PER_NODE": "${EFA_PER_NODE}"
+  "GPU_PER_NODE": "${GPU_PER_NODE}",
+  "EFA_PER_NODE": "${EFA_PER_NODE}",
+  "FSX_CLAIM": "${FSX_CLAIM}",
+  "HF_CACHE_DIR": "${HF_CACHE_DIR:-/mnt/fsx/asaha/hf_cache}",
+  "HF_TOKEN": "${HF_TOKEN:-}"
 }
 EOF
 

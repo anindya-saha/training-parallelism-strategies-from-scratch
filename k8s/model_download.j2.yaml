@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ JOB_NAME }}
+  namespace: {{ NAMESPACE }}
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        job-name: {{ JOB_NAME }}
+        app: model-download
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ SERVICE_ACCOUNT }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: sagemaker.amazonaws.com/node-health-status
+                    operator: In
+                    values:
+                      - Schedulable
+                  - key: sagemaker.amazonaws.com/compute-type
+                    operator: In
+                    values:
+                      - hyperpod
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      volumes:
+        - name: fsx-static
+          persistentVolumeClaim:
+            claimName: {{ FSX_CLAIM }}
+      containers:
+        - name: model-downloader
+          image: {{ IMAGE_URI }}
+          imagePullPolicy: IfNotPresent
+          resources: {}
+          env:
+            - name: MODEL_ID
+              value: "{{ MODEL_ID }}"
+            - name: HF_HOME
+              value: "{{ HF_CACHE_DIR }}"
+            - name: HUGGINGFACE_HUB_CACHE
+              value: "{{ HF_CACHE_DIR }}"
+            - name: HF_HUB_DISABLE_XET
+              value: "1"
+            - name: HF_TOKEN
+              value: "{{ HF_TOKEN }}"
+          command:
+            - python
+            - -u
+            - /workspace/training-parallelism-strategies-from-scratch/scripts/download_model.py
+          volumeMounts:
+            - name: fsx-static
+              mountPath: /mnt/fsx

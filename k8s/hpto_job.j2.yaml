@@ -4,18 +4,17 @@ metadata:
   name: {{ JOB_NAME }}
   namespace: {{ NAMESPACE }}
 spec:
-  nprocPerNode: "{{ NPROC_PER_NODE | default('8') }}"
+  nprocPerNode: "{{ GPU_PER_NODE }}"
 
   replicaSpecs:
     - name: pods
-      replicas: {{ NUM_NODES | default('1') }}
+      replicas: {{ NUM_NODES }}
       spares: 0
       template:
         metadata:
           labels:
             job-name: {{ JOB_NAME }}
             replica-type: pods
-            app: tp-experiments
         spec:
           nodeSelector:
             beta.kubernetes.io/instance-type: {{ INSTANCE_TYPE }}
@@ -59,7 +58,7 @@ spec:
                 path: /mnt/k8s-disks/0
             - name: fsx-static
               persistentVolumeClaim:
-                claimName: {{ FSX_CLAIM | default('fsx-static-claim') }}
+                claimName: {{ FSX_CLAIM }}
             - name: host-nvme-storage
               hostPath:
                 path: /opt/dlami/nvme
@@ -70,18 +69,16 @@ spec:
               imagePullPolicy: IfNotPresent
               resources:
                 requests:
-                  nvidia.com/gpu: "{{ GPUS_PER_NODE | default('8') }}"
-                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE | default('16') }}"
+                  nvidia.com/gpu: "{{ GPU_PER_NODE }}"
+                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE }}"
                 limits:
-                  nvidia.com/gpu: "{{ GPUS_PER_NODE | default('8') }}"
-                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE | default('16') }}"
+                  nvidia.com/gpu: "{{ GPU_PER_NODE }}"
+                  vpc.amazonaws.com/efa: "{{ EFA_PER_NODE }}"
               env:
                 - name: LOGLEVEL
                   value: INFO
                 - name: NCCL_DEBUG
                   value: INFO
-                - name: NCCL_ASYNC_ERROR_HANDLING
-                  value: "1"
                 - name: NCCL_SOCKET_IFNAME
                   value: ^lo
                 - name: GLOO_SOCKET_IFNAME
@@ -100,24 +97,33 @@ spec:
                   value: "expandable_segments:True"
                 - name: PYTHONFAULTHANDLER
                   value: "1"
-                - name: FI_EFA_USE_DEVICE_RDMA
-                  value: "1"
                 - name: FI_EFA_FORK_SAFE
                   value: "1"
+                - name: FI_EFA_USE_HUGE_PAGE
+                  value: "0"
                 - name: FI_LOG_LEVEL
                   value: "1"
-                - name: FI_PROVIDER
-                  value: efa
-                - name: LD_LIBRARY_PATH
-                  value: "/opt/amazon/efa/lib:/opt/amazon/openmpi/lib:/opt/amazon/ofi-nccl/lib:/usr/local/lib:$LD_LIBRARY_PATH"
+                - name: HF_HOME
+                  value: "{{ HF_CACHE_DIR }}"
+                - name: HUGGINGFACE_HUB_CACHE
+                  value: "{{ HF_CACHE_DIR }}"
+                - name: HF_HUB_DISABLE_XET
+                  value: "1"
+                - name: HF_TOKEN
+                  value: "{{ HF_TOKEN }}"
               command:
                 - hyperpodrun
                 - "--tee=3"
                 - "--log_dir=/tmp/hyperpod"
-                - "--nproc_per_node={{ NPROC_PER_NODE | default('8') }}"
-                - "--nnodes={{ NUM_NODES | default('1') }}"
+                - "--nnodes={{ NUM_NODES }}"
+                - "--nproc_per_node={{ GPU_PER_NODE }}"
                 - "--server-log-level=warning"
                 - "{{ TRAIN_SCRIPT }}"
+{%- if TRAIN_ARGS is defined and TRAIN_ARGS %}
+{%- for arg in TRAIN_ARGS.split() %}
+                - "{{ arg }}"
+{%- endfor %}
+{%- endif %}
               volumeMounts:
                 - name: shmem
                   mountPath: /dev/shm

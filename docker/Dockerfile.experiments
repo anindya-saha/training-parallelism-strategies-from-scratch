@@ -1,7 +1,12 @@
-FROM mlp.docker.zooxlabs.com/asaha/dist-train/cuda-12.9-pytorch-2.8-py3.12:1.0.0-rc1
+FROM public.ecr.aws/deep-learning-containers/pytorch-training:2.8.0-gpu-py312-cu129-ubuntu22.04-ec2
+
+RUN pip install --no-cache-dir hyperpod-elastic-agent
+
+RUN pip install --no-cache-dir transformers rich
 
 WORKDIR /workspace/training-parallelism-strategies-from-scratch
 
 COPY tensor-parallelism/src/*.py tensor-parallelism/
+COPY scripts/download_model.py scripts/
 
-CMD ["python", "tensor-parallelism/test_model.py"]
+CMD ["bash"]

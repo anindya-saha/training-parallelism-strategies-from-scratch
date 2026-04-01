@@ -11,9 +11,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # -- Defaults -----------------------------------------------------------------
+# Load your dev.env (REGISTRY, etc.) before launching this script so the
+# variables below pick up your overrides.
 
-REGISTRY=mlp.docker.acme.com
-EXPERIMENT_REPO="${REGISTRY}/${CURRENT_USER}/dist-train/experiments"
+REGISTRY="${REGISTRY:?Set REGISTRY in your dev.env}"
 PUSH=true
 
 # -- Usage --------------------------------------------------------------------
@@ -60,6 +61,8 @@ while [[ $# -gt 0 ]]; do
     *)                   echo "Unknown option: $1"; usage ;;
   esac
 done
+
+EXPERIMENT_REPO="${EXPERIMENT_REPO:-${REGISTRY}/${CURRENT_USER}/dist-train/experiments}"
 
 # -- Build image --------------------------------------------------------------
 
