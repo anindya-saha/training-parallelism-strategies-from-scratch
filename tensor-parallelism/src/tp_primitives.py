@@ -13,10 +13,10 @@ Run with: torchrun --nproc_per_node=2 test_tp_primitives.py
 import torch
 import torch.distributed as dist
 
-
 # ============================
 #  TP Communication Primitives
 # ============================
+
 
 class _CopyToParallelRegion(torch.autograd.Function):
     """Identity in forward, all-reduce in backward.
@@ -155,7 +155,7 @@ class TPPrimitivesTest:
 
         X_local = _CopyToParallelRegion.apply(self.X)
         Y_local = X_local @ W1_local
-        
+
         Y_local_expected = (self.X @ self.W1).chunk(self.ws, dim=1)[self.rank]
         assert torch.allclose(Y_local, Y_local_expected, atol=1e-4)
 
@@ -181,7 +181,7 @@ class TPPrimitivesTest:
         Y_partial = X_local @ W2_local
 
         Y_full = _ReduceFromParallelRegion.apply(Y_partial)
-        
+
         assert torch.allclose(Y_full, self.X @ self.W2, atol=1e-4)
 
     # ------------------------------------------------------------------
@@ -242,8 +242,10 @@ class TPPrimitivesTest:
         if self.rank == 0:
             print("=" * 60)
             print("  TP Primitives Test - matching hand-drawn diagram")
-            print(f"  X{list(self.X.shape)} @ W1{list(self.W1.shape)} @ W2{list(self.W2.shape)} "
-                  f"= Y{list(self.Y.shape)}")
+            print(
+                f"  X{list(self.X.shape)} @ W1{list(self.W1.shape)} @ W2{list(self.W2.shape)} "
+                f"= Y{list(self.Y.shape)}"
+            )
             print("=" * 60)
 
         dist.barrier()

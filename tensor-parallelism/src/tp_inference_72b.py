@@ -28,8 +28,6 @@ import logging
 import os
 import time
 
-os.environ["HF_HUB_DISABLE_XET"] = "1"
-
 from rich.logging import RichHandler
 
 import torch

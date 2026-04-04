@@ -16,4 +16,3 @@ def get_gpu_memory_mb(device=0) -> float:
 
 def get_gpu_peak_memory_mb(device=0) -> float:
     return torch.cuda.max_memory_allocated(device) / 1024 / 1024
-

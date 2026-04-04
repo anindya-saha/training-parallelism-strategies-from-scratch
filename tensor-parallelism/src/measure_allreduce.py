@@ -6,8 +6,6 @@ import time
 import torch
 import torch.distributed as dist
 
-from rich.logging import RichHandler
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_WARMUP = 5
@@ -30,8 +28,9 @@ def average_us(times: list[float]) -> float:
     return sum(times) / len(times) * 1e6
 
 
-def benchmark_allreduce(rank: int, ws: int, device: torch.device,
-                        warmup: int, trials: int) -> None:
+def benchmark_allreduce(
+    rank: int, ws: int, device: torch.device, warmup: int, trials: int
+) -> None:
     """Measure all-reduce latency for various tensor sizes."""
     sep = "=" * 70
     dash = "-" * 60
@@ -62,17 +61,26 @@ def benchmark_allreduce(rank: int, ws: int, device: torch.device,
 
         if rank == 0:
             mb = n * 2 / 1e6  # bfloat16 = 2 bytes
-            logger.info("  %-28s %12s %8.2f %12.1f",
-                        name, f"{n:,}", mb, average_us(times))
+            logger.info(
+                "  %-28s %12s %8.2f %12.1f", name, f"{n:,}", mb, average_us(times)
+            )
 
     if rank == 0:
         logger.info(sep)
 
 
-def benchmark_compute_vs_comm(rank: int, ws: int, device: torch.device,
-                              warmup: int, trials: int,
-                              B: int, T: int, D: int, D_FF: int,
-                              n_layers: int) -> None:
+def benchmark_compute_vs_comm(
+    rank: int,
+    ws: int,
+    device: torch.device,
+    warmup: int,
+    trials: int,
+    B: int,
+    T: int,
+    D: int,
+    D_FF: int,
+    n_layers: int,
+) -> None:
     """Compare matmul compute time against all-reduce communication time."""
     x = torch.randn(B * T, D, device=device, dtype=torch.bfloat16)
     w = torch.randn(D, D_FF // ws, device=device, dtype=torch.bfloat16)
@@ -106,17 +114,28 @@ def benchmark_compute_vs_comm(rank: int, ws: int, device: torch.device,
         allreduce_per_step = n_layers * 2
 
         logger.info("")
-        logger.info("  COMPUTE vs COMMUNICATION (B=%d, T=%d, D=%d, D_FF=%d):", B, T, D, D_FF)
+        logger.info(
+            "  COMPUTE vs COMMUNICATION (B=%d, T=%d, D=%d, D_FF=%d):", B, T, D, D_FF
+        )
         logger.info("  Matmul time:      %10.1f us", avg_compute)
         logger.info("  All-reduce time:  %10.1f us", avg_comm)
         logger.info("  Overhead ratio:   %10.1f%%", avg_comm / avg_compute * 100)
-        logger.info("  TP efficiency:    %10.1f%%", avg_compute / (avg_compute + avg_comm) * 100)
-        logger.info("  Total comm/step:  ~%.2f ms (%d layers x 2 ARs = %d/step)", allreduce_per_step * avg_comm / 1000, n_layers, allreduce_per_step)
+        logger.info(
+            "  TP efficiency:    %10.1f%%", avg_compute / (avg_compute + avg_comm) * 100
+        )
+        logger.info(
+            "  Total comm/step:  ~%.2f ms (%d layers x 2 ARs = %d/step)",
+            allreduce_per_step * avg_comm / 1000,
+            n_layers,
+            allreduce_per_step,
+        )
         logger.info("")
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Measure all-reduce latency and TP overhead")
+    p = argparse.ArgumentParser(
+        description="Measure all-reduce latency and TP overhead"
+    )
     p.add_argument("--warmup", type=int, default=DEFAULT_WARMUP)
     p.add_argument("--trials", type=int, default=DEFAULT_TRIALS)
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
@@ -132,7 +151,6 @@ def main():
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%H:%M:%S]",
-        handlers=[RichHandler(rich_tracebacks=True)],
     )
 
     args = parse_args()
@@ -147,8 +165,15 @@ def main():
 
     benchmark_allreduce(rank, ws, device, args.warmup, args.trials)
     benchmark_compute_vs_comm(
-        rank, ws, device, args.warmup, args.trials,
-        B=args.batch_size, T=args.seq_len, D=args.d_model, D_FF=args.d_ff,
+        rank,
+        ws,
+        device,
+        args.warmup,
+        args.trials,
+        B=args.batch_size,
+        T=args.seq_len,
+        D=args.d_model,
+        D_FF=args.d_ff,
         n_layers=args.n_layers,
     )
 

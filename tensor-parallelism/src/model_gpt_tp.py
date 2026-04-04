@@ -13,8 +13,6 @@ import math
 import os
 import time
 
-from rich.logging import RichHandler
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -233,7 +231,8 @@ class TPGPT(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 TPGPTTransformerBlock(
-                    d_model, n_heads,
+                    d_model,
+                    n_heads,
                     d_ff,
                     attn_bias=attn_bias,
                     ffn_bias=ffn_bias,
@@ -301,6 +300,7 @@ def parse_args():
     p.add_argument("--seq-len", type=int, default=DEFAULT_SEQ_LEN)
     p.add_argument("--warmup", type=int, default=DEFAULT_NUM_WARMUP)
     p.add_argument("--benchmark", type=int, default=DEFAULT_NUM_BENCHMARK)
+    p.add_argument("--output-dir", type=str, default="outputs")
     return p.parse_args()
 
 
@@ -309,7 +309,6 @@ def main():
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%H:%M:%S]",
-        handlers=[RichHandler(rich_tracebacks=True)],
     )
 
     args = parse_args()
@@ -440,7 +439,9 @@ def main():
             tokens_per_sec=round(args.batch_size * args.seq_len / average(step_t), 1),
             loss=round(loss.item(), 4),
         )
-        with open("results_model_gpt_tp.json", "w") as fout:
+        os.makedirs(args.output_dir, exist_ok=True)
+        out_path = os.path.join(args.output_dir, "results_model_gpt_tp.json")
+        with open(out_path, "w") as fout:
             json.dump(results, fout, indent=2)
         logger.info("=" * 60)
         logger.info("  Model GPT - Tensor parallelism - %d GPUs", ws)

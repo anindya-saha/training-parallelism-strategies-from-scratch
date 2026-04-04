@@ -8,9 +8,10 @@ import argparse
 import json
 import logging
 import math
+import os
 import time
 
-from rich.logging import RichHandler
+#from rich.logging import RichHandler
 
 import torch
 import torch.nn as nn
@@ -24,10 +25,10 @@ logger = logging.getLogger(__name__)
 # Default Model & Benchmark Constants
 # ================================================================
 
-DEFAULT_D_MODEL = 512       # hidden dimension (embedding size)
-DEFAULT_N_HEADS = 8         # number of attention heads
-DEFAULT_D_FF = 2048         # feed-forward intermediate dimension (4x D_MODEL)
-DEFAULT_N_LAYERS = 6        # number of transformer blocks
+DEFAULT_D_MODEL = 512  # hidden dimension (embedding size)
+DEFAULT_N_HEADS = 8  # number of attention heads
+DEFAULT_D_FF = 2048  # feed-forward intermediate dimension (4x D_MODEL)
+DEFAULT_N_LAYERS = 6  # number of transformer blocks
 DEFAULT_VOCAB_SIZE = 10_000
 DEFAULT_MAX_SEQ_LEN = 512
 
@@ -90,8 +91,14 @@ class StandardFFN(nn.Module):
 
 
 class StandardTransformerBlock(nn.Module):
-    def __init__(self, d_model: int, n_heads: int, d_ff: int,
-                 attn_bias: bool = False, ffn_bias: bool = True):
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        d_ff: int,
+        attn_bias: bool = False,
+        ffn_bias: bool = True,
+    ):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
         self.attn = StandardAttention(d_model, n_heads, bias=attn_bias)
@@ -125,11 +132,14 @@ class StandardGPT(nn.Module):
         self.vocab_size = vocab_size
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Embedding(max_seq_len, d_model)
-        self.blocks = nn.ModuleList([
-            StandardTransformerBlock(d_model, n_heads, d_ff,
-                                    attn_bias=attn_bias, ffn_bias=ffn_bias)
-            for _ in range(n_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                StandardTransformerBlock(
+                    d_model, n_heads, d_ff, attn_bias=attn_bias, ffn_bias=ffn_bias
+                )
+                for _ in range(n_layers)
+            ]
+        )
         self.ln_f = nn.LayerNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
@@ -162,6 +172,7 @@ def parse_args():
     p.add_argument("--seq-len", type=int, default=DEFAULT_SEQ_LEN)
     p.add_argument("--warmup", type=int, default=DEFAULT_NUM_WARMUP)
     p.add_argument("--benchmark", type=int, default=DEFAULT_NUM_BENCHMARK)
+    p.add_argument("--output-dir", type=str, default="outputs")
     return p.parse_args()
 
 
@@ -170,7 +181,7 @@ def main():
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%H:%M:%S]",
-        handlers=[RichHandler(rich_tracebacks=True)],
+        #handlers=[RichHandler(rich_tracebacks=True)],
     )
 
     args = parse_args()
@@ -183,7 +194,11 @@ def main():
     logger.info("Standard GPT benchmark (single GPU)")
     logger.info(
         "d_model=%d, n_heads=%d, d_ff=%d, n_layers=%d, vocab=%d",
-        args.d_model, args.n_heads, args.d_ff, args.n_layers, args.vocab_size,
+        args.d_model,
+        args.n_heads,
+        args.d_ff,
+        args.n_layers,
+        args.vocab_size,
     )
 
     model = StandardGPT(
@@ -203,8 +218,12 @@ def main():
     logger.info("Model params: %s", f"{n_params:,}")
     logger.info("Model size: %.2f MB", mem_model)
 
-    input_ids = torch.randint(0, args.vocab_size, (args.batch_size, args.seq_len), device=device)
-    labels = torch.randint(0, args.vocab_size, (args.batch_size, args.seq_len), device=device)
+    input_ids = torch.randint(
+        0, args.vocab_size, (args.batch_size, args.seq_len), device=device
+    )
+    labels = torch.randint(
+        0, args.vocab_size, (args.batch_size, args.seq_len), device=device
+    )
 
     for _ in range(args.warmup):
         logits = model(input_ids)
@@ -219,14 +238,18 @@ def main():
     fwd_t, bwd_t, step_t = [], [], []
     for _ in range(args.benchmark):
         optimizer.zero_grad()
-        torch.cuda.synchronize(); t0 = time.perf_counter()
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
         logits = model(input_ids)
         loss = F.cross_entropy(logits.view(-1, args.vocab_size), labels.view(-1))
-        torch.cuda.synchronize(); t1 = time.perf_counter()
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
         loss.backward()
-        torch.cuda.synchronize(); t2 = time.perf_counter()
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
         optimizer.step()
-        torch.cuda.synchronize(); t3 = time.perf_counter()
+        torch.cuda.synchronize()
+        t3 = time.perf_counter()
         fwd_t.append(t1 - t0)
         bwd_t.append(t2 - t1)
         step_t.append(t3 - t0)
@@ -235,7 +258,9 @@ def main():
 
     logger.info(
         "params: %s | model: %.1f MB | peak: %.1f MB",
-        f"{n_params:,}", mem_model, peak,
+        f"{n_params:,}",
+        mem_model,
+        peak,
     )
 
     average = lambda values: sum(values) / len(values)
@@ -258,7 +283,9 @@ def main():
         tokens_per_sec=round(args.batch_size * args.seq_len / average(step_t), 1),
         loss=round(loss.item(), 4),
     )
-    with open("results_model_gpt.json", "w") as fout:
+    os.makedirs(args.output_dir, exist_ok=True)
+    out_path = os.path.join(args.output_dir, "results_model_gpt.json")
+    with open(out_path, "w") as fout:
         json.dump(results, fout, indent=2)
     logger.info("=" * 60)
     logger.info("  Model GPT - No parallelism - 1 GPU")

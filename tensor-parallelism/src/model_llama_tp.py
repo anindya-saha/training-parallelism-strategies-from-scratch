@@ -382,6 +382,7 @@ def parse_args():
     p.add_argument("--seq-len", type=int, default=DEFAULT_SEQ_LEN)
     p.add_argument("--warmup", type=int, default=DEFAULT_NUM_WARMUP)
     p.add_argument("--benchmark", type=int, default=DEFAULT_NUM_BENCHMARK)
+    p.add_argument("--output-dir", type=str, default="outputs")
     return p.parse_args()
 
 
@@ -527,7 +528,9 @@ def main():
             tokens_per_sec=round(args.batch_size * args.seq_len / average(step_t), 1),
             loss=round(loss.item(), 4),
         )
-        with open("results_model_llama_tp.json", "w") as fout:
+        os.makedirs(args.output_dir, exist_ok=True)
+        out_path = os.path.join(args.output_dir, "results_model_llama_tp.json")
+        with open(out_path, "w") as fout:
             json.dump(results, fout, indent=2)
         logger.info("=" * 60)
         logger.info("  Model Llama - Tensor parallelism - %d GPUs", ws)

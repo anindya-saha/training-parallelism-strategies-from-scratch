@@ -5,7 +5,6 @@ import os
 import torch
 import torch.distributed as dist
 
-from rich.logging import RichHandler
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +60,8 @@ def inspect_block(model: torch.nn.Module, ws: int) -> None:
     block = model.blocks[0]
     class_map = get_module_class_map(block)
 
-    sep = "=" * 110
-    dash = "-" * 108
+    sep = "=" * 114
+    dash = "-" * 112
 
     logger.info("")
     logger.info(sep)
@@ -131,7 +130,6 @@ def main():
         level=logging.INFO,
         format="%(message)s",
         datefmt="[%H:%M:%S]",
-        handlers=[RichHandler(rich_tracebacks=True)],
     )
 
     args = parse_args()
