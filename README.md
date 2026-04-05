@@ -14,13 +14,14 @@ Understanding scaling LLM training - with concrete code, hand-drawn diagrams, an
 2. [First Steps: Training on One GPU](#first-steps-training-on-one-gpu)
 3. [Data Parallelism](#data-parallelism)
 4. [Tensor Parallelism](#tensor-parallelism)
-5. [Context Parallelism](#context-parallelism)
-6. [Pipeline Parallelism](#pipeline-parallelism)
-7. [Expert Parallelism](#expert-parallelism)
-8. [5D Parallelism in a Nutshell](#5d-parallelism-in-a-nutshell)
-9. [Finding the Best Training Configuration](#finding-the-best-training-configuration)
-10. [Diving in the GPUs - Fusing, Threading, Mixing](#diving-in-the-gpus----fusing-threading-mixing)
-11. [Appendix](#appendix)
+5. [Sequence Parallelism](#sequence-parallelism)
+6. [Context Parallelism](#context-parallelism)
+7. [Pipeline Parallelism](#pipeline-parallelism)
+8. [Expert Parallelism](#expert-parallelism)
+9. [5D Parallelism in a Nutshell](#5d-parallelism-in-a-nutshell)
+10. [Finding the Best Training Configuration](#finding-the-best-training-configuration)
+11. [Diving in the GPUs - Fusing, Threading, Mixing](#diving-in-the-gpus----fusing-threading-mixing)
+12. [Appendix](#appendix)
 
 ---
 
@@ -28,6 +29,14 @@ Understanding scaling LLM training - with concrete code, hand-drawn diagrams, an
 ## High Level Overview
 
 TODO
+
+
+---
+
+
+## Running Tests and Benchmarks
+
+See [developer.md](developer.md) for setup, CLI flags, benchmark commands, and Kubernetes deployment.
 
 
 ---
@@ -77,7 +86,9 @@ TODO
 
 See [tensor-parallelism.md](tensor-parallelism.md) for the full writeup: Column-Parallel and Row-Parallel Linear derivations with concrete matrix examples, autograd primitives, the conjugate cancellation, Transformer block TP (attention + MLP), MHA/GQA/MQA comparison, and communication summary.
 
+## Sequence Parallelism
 
+See [sequence-parallelism.md](sequence-parallelism.md) for the full write-up on Sequence Parallelism.
 ---
 
 

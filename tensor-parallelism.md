@@ -18,7 +18,7 @@ We walk through TP step by step using concrete matrices on 2 GPUs: first Column-
 
 ### Setup: The Matrices
 
-![Column Linear](tensor-parallelism/images/tp-inputs.png)
+![Column Linear](images/tp-inputs.png)
 
 Every example uses the same input matrix $X$ and two weight matrices $W^1$ and $W^2$:
 
@@ -138,7 +138,7 @@ class _AllGatherFromParallelRegion(torch.autograd.Function):
 
 **Key idea:** Split $W$ by *columns*. Each GPU holds a vertical slice. Every GPU receives the full input $X$, multiplies by its local shard, and produces a *slice* of the output.
 
-![Column Linear](tensor-parallelism/images/tp-column.png)
+![Column Linear](images/tp-column.png)
 
 <details>
 <summary>Click to expand to see how the Matrix calculation works out</summary>
@@ -189,14 +189,14 @@ def test_column_linear(self):
 
 </details>
 
-![Col Linear Primitives](tensor-parallelism/images/tp-col-prim.png)
+![Col Linear Primitives](images/tp-col-prim.png)
 
 
 ### Row-Parallel Linear
 
 **Key idea:** Split $W$ by *rows*. Each GPU holds a horizontal slice. The *input* must also be split - each GPU gets the columns of $X$ that align with its rows of $W$. The outputs are *partial sums* that must be added together.
 
-![Row Linear](tensor-parallelism/images/tp-row.png)
+![Row Linear](images/tp-row.png)
 
 <details>
 <summary>Click to expand to see how the Matrix calculation works out</summary>
@@ -254,7 +254,7 @@ def test_row_linear(self):
 
 </details>
 
-![Row Linear Primitives](tensor-parallelism/images/tp-row-prim.png)
+![Row Linear Primitives](images/tp-row-prim.png)
 
 
 ### Column Parallel + Row Prallel Combined: The Cancellation
@@ -299,7 +299,7 @@ def test_column_then_row(self):
 
 </details>
 
-![Tensor Parallelism with Column + Row Linear](tensor-parallelism/images/tp-col-row-prim.png)
+![Tensor Parallelism with Column + Row Linear](images/tp-col-row-prim.png)
 
 
 ### Tensor Parallelism in a Transformer Block
@@ -430,10 +430,5 @@ a single node, fast NVLink interconnects keep overhead low. Going across nodes
 requires slower network connections and throughput drops significantly.
 
 
-### Running Tests and Benchmarks
 
-See [developer.md](developer.md) for setup, CLI flags, benchmark commands, and Kubernetes deployment.
-
-### Sequence Parallelism
-
-TODO
+See [developer.md](developer.md) for full setup and CLI flags.
