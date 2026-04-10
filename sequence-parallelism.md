@@ -17,7 +17,7 @@ Operations PARALLELIZED by TP:              Operations NOT parallelized by TP:
 
 In vanilla TP, after a row-parallel layer (e.g., $W_o$ or $W_2$), each GPU holds a partial sum of shape $(B, S, h)$. An **all-reduce** sums these partials so every GPU gets the full result. Then LayerNorm and Dropout operate on the full $(B, S, h)$ tensor - *identically on every GPU*. This is redundant work and wasted memory.
 
-![Vanilla TP vs TP+SP](images/tp-sp.png)
+![Vanilla TP vs TP+SP](sequence-parallelism/images/tp-sp.png)
 
 The diagram shows a single transformer block under vanilla TP (left) and TP+SP (right). The dashed lines mark the communication boundaries between regions. In vanilla TP, `f` (identity forward, all-reduce backward) and `f*` (all-reduce forward, identity backward) bracket the TP region. In TP+SP, these are replaced by `g` (all-gather forward, reduce-scatter backward) and `g*` (reduce-scatter forward, all-gather backward), which transition between TP regions (blue, hidden-dim sharded) and SP regions (cyan, sequence-dim sharded). LayerNorm, Dropout, and residual adds now live in the SP region at $(B, S/N, h)$ instead of the full $(B, S, h)$.
 
@@ -252,7 +252,7 @@ Output                        (2, 2, 4)         (2, 2, 4)         s sharded
 
 Every `[X]` in vanilla TP becomes `[SAVED]` in TP+SP. The TP region shapes are identical - SP only changes the non-TP operations.
 
-![Activation Size at Each Step](images/tp-sp-viz-shape_journey.png)
+![Activation Size at Each Step](sequence-parallelism/images/tp-sp-viz-shape_journey.png)
 
 
 ### Communication Cost: Identical to Vanilla TP
@@ -277,7 +277,7 @@ This looks like 2x the communication, but **all-reduce = reduce-scatter + all-ga
 
 The [analyze_comm.py](sequence-parallelism/src/analyze_comm.py) script verifies this empirically by timing all-reduce vs reduce-scatter + all-gather independently.
 
-![Communication Volume: Vanilla TP vs TP+SP](images/tp-sp-viz-communication.png)
+![Communication Volume: Vanilla TP vs TP+SP](sequence-parallelism/images/tp-sp-viz-communication.png)
 
 
 ### Memory Savings
@@ -303,7 +303,7 @@ Savings:                                           5.4 GB per GPU!
 
 The TP-region activations (QKV, attention scores, FFN intermediate) are unchanged. SP only reduces the non-TP activations (LayerNorm, Dropout, residuals) by a factor of N.
 
-![Per-Component Activation Memory](images/tp-sp-viz-activation-breakdown.png)
+![Per-Component Activation Memory](sequence-parallelism/images/tp-sp-viz-activation-breakdown.png)
 
 
 ### The Embedding Layer with SP
@@ -393,3 +393,5 @@ The only "cost" is implementation complexity, which is already handled by the fr
 | [sequence-parallelism/src/model_gpt_tp_sp.py](sequence-parallelism/src/model_gpt_tp_sp.py) | TP + SP GPT |
 | [sequence-parallelism/src/analyze_comm.py](sequence-parallelism/src/analyze_comm.py) | Communication cost analysis |
 | [sequence-parallelism/src/trace_shapes.py](sequence-parallelism/src/trace_shapes.py) | Activation shape trace |
+
+See [developer.md](developer.md) for full setup and CLI flags.
