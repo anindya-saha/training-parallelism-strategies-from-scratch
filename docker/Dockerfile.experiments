@@ -4,10 +4,21 @@ RUN pip install --no-cache-dir hyperpod-elastic-agent
 
 RUN pip install --no-cache-dir transformers rich
 
+# DeepSpeed for pipeline-parallelism notebooks
+RUN pip install --no-cache-dir deepspeed
+
+# Jupyter Lab + notebook stack
+RUN pip install --no-cache-dir "jupyterlab>=4.0.0" ipykernel matplotlib
+
 WORKDIR /workspace/training-parallelism-strategies-from-scratch
 
 COPY tensor-parallelism/src/*.py tensor-parallelism/
 
+COPY pipeline-parallelism pipeline-parallelism/
+
 COPY scripts/download_model.py scripts/
 
+EXPOSE 8888
+
+# HyperPod training jobs override this; Jupyter pods set command in Kubernetes.
 CMD ["bash"]

@@ -1,0 +1,12 @@
+{
+    "train_batch_size": 8,
+    "train_micro_batch_size_per_gpu": 4,
+    "steps_per_print": 999,
+    "optimizer": {
+        "type": "Adam",
+        "params": {"lr": 3e-4, "betas": [0.9, 0.999]}
+    },
+    "fp16": {"enabled": true, "initial_scale_power": 12},
+    "pipeline": {"pipe_partitioned": true, "grad_partitioned": true},
+    "wall_clock_breakdown": false
+}

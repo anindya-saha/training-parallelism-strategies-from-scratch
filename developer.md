@@ -32,12 +32,14 @@ training-parallelism-strategies-from-scratch/
   k8s/                            Kubernetes manifests
     hpto_job.j2.yaml              Jinja2 template for HyperPodPyTorchJob
     model_download.j2.yaml        Jinja2 template for model download K8s Job
+    jupyter_lab.deployment.j2.yaml  Jupyter Lab Deployment + Service (Jinja2)
     hpto_fsdp.yaml                Reference FSDP manifest
 
   scripts/                        Automation
     build_image.sh                Build + push the experiment image
     run_hpto_job.sh               Render template + submit HyperPodPyTorchJob
     run_model_download.sh         Render template + submit model download Job
+    run_jupyter_lab.sh            Render Jupyter YAML, delete if exists, kubectl create
 ```
 
 ## Setup
@@ -61,16 +63,25 @@ live in your `dev.env`. Source it before running any script:
 source dev.env
 ```
 
-The scripts (`run_hpto_job.sh`, `run_model_download.sh`) expect variables like
+The scripts (`run_hpto_job.sh`, `run_model_download.sh`, `run_jupyter_lab.sh`) expect variables like
 `REGISTRY`, `NAMESPACE`, `SERVICE_ACCOUNT`, `FSX_CLAIM`, `HF_CACHE_DIR`, and
 `HF_TOKEN` to already be in the environment.
 
-## Docker image
+## Creating Docker Images
 
 The experiment image is a thin layer on top of the
 [AWS Deep Learning Container](https://github.com/aws/deep-learning-containers)
-for PyTorch. It adds `hyperpod-elastic-agent`, `transformers`, `rich`, and
-copies source files into the container.
+for PyTorch. 
+
+It adds `hyperpod-elastic-agent`, `transformers`, `rich`,
+`jupyterlab`, `ipykernel`, `matplotlib`, and `deepspeed`. 
+
+It copies
+`tensor-parallelism/src` (Python files), `pipeline-parallelism/` (notebooks and
+code), and `scripts/download_model.py` into `/workspace/training-parallelism-strategies-from-scratch`
+
+It exposes port 8888 for Jupyter Lab when you run that workload from Kubernetes
+(see `k8s/jupyter_lab.deployment.j2.yaml` and `scripts/run_jupyter_lab.sh`).
 
 Base image: `public.ecr.aws/deep-learning-containers/pytorch-training:2.8.0-gpu-py312-cu129-ubuntu22.04-ec2`
 
@@ -84,8 +95,7 @@ Using the build script (recommended - uses content-addressed SHA tags):
 Or manually:
 
 ```bash
-docker build -f docker/Dockerfile.experiments \
-  -t ${REGISTRY}/${USER}/dist-train/experiments:latest .
+docker build -f docker/Dockerfile.experiments -t ${REGISTRY}/${USER}/dist-train/experiments:latest .
 docker push ${REGISTRY}/${USER}/dist-train/experiments:latest
 ```
 
@@ -94,6 +104,8 @@ Test locally:
 ```bash
 docker run --rm --gpus 1 ${REGISTRY}/${USER}/dist-train/experiments:latest
 ```
+
+Make sure `REGISTRY` is set in your environment (via `dev.env`) before running.
 
 ## Kubernetes Deployment
 
@@ -156,6 +168,69 @@ for model download commands (`run_model_download.sh`, manual, and Argo Workflows
 | p4de   | ml.p4de.24xlarge      | 8x A100 80GB   |
 | p5en   | ml.p5en.48xlarge      | 8x H200 141GB  |
 | p6     | ml.p6-b200.48xlarge   | 8x B200        |
+
+### Jupyter Lab
+
+The experiment image includes Jupyter Lab. `scripts/run_jupyter_lab.sh` renders
+`k8s/jupyter_lab.deployment.j2.yaml` to `<deployment-name>.yaml` in the current
+working directory (same pattern as `run_hpto_job.sh` writing `<job-name>.yaml`),
+runs `kubectl delete -f` on that file if it exists (drops prior Deployment + Service),
+then `kubectl create -f`.
+You connect from your laptop with `kubectl port-forward` to the Service on port 8888.
+
+**Prerequisites:** `source dev.env`, working `kubectl` context to the cluster, and
+`jinja2` CLI (`uv sync` in this repo).
+
+**1. Deploy Jupyter** (`--node-type` is required; same presets as `run_hpto_job.sh`,
+or a full label such as `ml.p5en.48xlarge`). By default `run_jupyter_lab.sh` runs
+`build_image.sh` (build + push), matching `run_hpto_job.sh`. Use `--skip-build` to
+reuse the newest local image without rebuilding, or `--image-uri` for a specific
+tag (implies `--skip-build`).
+
+```bash
+./scripts/run_jupyter_lab.sh --node-type p5en
+
+./scripts/run_jupyter_lab.sh --node-type p5en --skip-build
+
+./scripts/run_jupyter_lab.sh \
+    --node-type p5en \
+    --image-uri "${REGISTRY}/${USER}/dist-train/experiments:<tag>"
+```
+
+For build without push, then deploy with that tag:
+`eval "$(./scripts/build_image.sh --no-push)"` then
+`./scripts/run_jupyter_lab.sh --node-type p5en --image-uri "${IMAGE_URI}"`.
+
+If you omit `--jupyter-token`, the script generates one and prints it to stderr:
+save that value for the browser. Optional flags: `--deployment-name` (default
+`jupyter-lab`), `--gpu-count` (default `4`), `--namespace`, `--dry-run` to print
+rendered YAML only.
+
+**2. Wait until the pod is ready:**
+
+```bash
+kubectl get pods -n "${NAMESPACE:-mlp}" -l "app=jupyter-lab,deployment=jupyter-lab"
+kubectl wait pod -n "${NAMESPACE:-mlp}" -l "app=jupyter-lab,deployment=jupyter-lab" --for=condition=Ready --timeout=300s
+```
+
+Use your deployment name in the label if you passed `--deployment-name`.
+
+**3. Port-forward from your machine** (default Service name is `<deployment>-svc`):
+
+```bash
+kubectl port-forward -n "${NAMESPACE:-mlp}" "svc/jupyter-lab-svc" 8888:8888
+```
+
+**4. Open Jupyter Lab** in a browser, using the token from step 1:
+
+`http://127.0.0.1:8888/lab?token=<YOUR_TOKEN>`
+
+**Cleanup** (default deployment name `jupyter-lab`; change names if you used
+`--deployment-name`):
+
+```bash
+kubectl delete -n "${NAMESPACE:-mlp}" "deployment/jupyter-lab" "svc/jupyter-lab-svc"
+```
 
 ### Monitoring a running job
 

@@ -17,7 +17,7 @@ spec:
             replica-type: pods
         spec:
           nodeSelector:
-            beta.kubernetes.io/instance-type: {{ INSTANCE_TYPE }}
+            node.kubernetes.io/instance-type: {{ INSTANCE_TYPE }}
           serviceAccountName: {{ SERVICE_ACCOUNT }}
           affinity:
             podAntiAffinity:
