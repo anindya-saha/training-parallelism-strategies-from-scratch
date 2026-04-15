@@ -9,7 +9,7 @@ When a model does not fit on one device, **Pipeline Parallelism (PP)** splits **
 3. **From toy MLP to small GPT** - same slice idea; tensors, loss, `get_stage` return tuple.
 4. **Pipeline schedules and timelines** - Naive vs GPipe(AfAB) vs Pipedream(1F1B) in one place: definitions, comparison table, figure, timelines.
 5. **Bubble formula** - idealized bubble fraction vs microbatch count.
-6. **Runnable scripts and benchmark** — `naive.py` / `gpipe.py` / `pipedream.py` on GPT, then `bench_single_vs_pipeline.py`.
+6. **Runnable scripts and benchmark** - `naive.py` / `gpipe.py` / `pipedream.py` on GPT, then `bench_single_vs_pipeline.py`.
 7. **DeepSpeed notebook** - demonstrating using DeepSpeed to do Pipeline Parallelism on a large model over 4 x H200 Gpus.
 7. **[TODO] Pytorch Distributed notebook** - demonstrating using Pytorch Distributed modules to do Pipeline Parallelism on a large model over 4 x H200 Gpus.
 8. **Relation to other parallelisms** and **references**.

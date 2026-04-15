@@ -20,7 +20,9 @@ dependencies = [
     "torchdata",
     "jinja2-cli>=0.8.0",
     "tensorboard",
-    "torch-tb-profiler"
+    "torch-tb-profiler",
+    "tiktoken",
+    "datasets",
 ]
 
 [project.optional-dependencies]
