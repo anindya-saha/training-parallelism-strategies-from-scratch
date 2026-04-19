@@ -78,7 +78,7 @@ spec:
                 - name: LOGLEVEL
                   value: INFO
                 - name: NCCL_DEBUG
-                  value: INFO
+                  value: WARN
                 - name: NCCL_SOCKET_IFNAME
                   value: ^lo
                 - name: GLOO_SOCKET_IFNAME
@@ -87,7 +87,7 @@ spec:
                   value: "1"
                 - name: TORCH_NCCL_ENABLE_MONITORING
                   value: "1"
-                - name: TORCH_NCCL_TRACE_BUFFER_SIZE
+                - name: TORCH_FR_BUFFER_SIZE
                   value: "20000"
                 - name: TORCH_NCCL_DUMP_ON_TIMEOUT
                   value: "1"

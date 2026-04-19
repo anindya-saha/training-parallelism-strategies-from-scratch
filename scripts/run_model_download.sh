@@ -9,7 +9,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TEMPLATE_FILE="${PROJECT_DIR}/k8s/model_download.j2.yaml"
+TEMPLATE_FILE="${PROJECT_DIR}/k8s/model_download.yaml.template"
 
 if ! command -v jinja2 &>/dev/null; then
   echo "Error: jinja2 CLI not found. Install with: pip install jinja2-cli"
@@ -17,10 +17,10 @@ if ! command -v jinja2 &>/dev/null; then
 fi
 
 # -- Defaults -----------------------------------------------------------------
-# Load your dev.env (REGISTRY, NAMESPACE, HF_CACHE_DIR, HF_TOKEN, etc.)
+# Load your env.dev (REGISTRY, NAMESPACE, HF_CACHE_DIR, HF_TOKEN, etc.)
 # before launching this script so the variables below pick up your overrides.
 
-REGISTRY="${REGISTRY:?Set REGISTRY in your dev.env}"
+REGISTRY="${REGISTRY:?Set REGISTRY in your env.dev}"
 EXPERIMENT_REPO="${REGISTRY}/${CURRENT_USER}/dist-train/experiments"
 
 NAMESPACE="${NAMESPACE:-mlp}"

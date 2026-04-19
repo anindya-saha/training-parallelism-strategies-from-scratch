@@ -12,11 +12,13 @@ RUN pip install --no-cache-dir "jupyterlab>=4.0.0" ipykernel matplotlib
 
 WORKDIR /workspace/training-parallelism-strategies-from-scratch
 
-COPY tensor-parallelism/src/*.py tensor-parallelism/
+COPY tensor-parallelism tensor-parallelism/
 
 COPY pipeline-parallelism pipeline-parallelism/
 
 COPY scripts/download_model.py scripts/
+
+COPY capstone capstone/
 
 EXPOSE 8888
 

@@ -14,15 +14,15 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TEMPLATE_FILE="${PROJECT_DIR}/k8s/hpto_job.j2.yaml"
+TEMPLATE_FILE="${PROJECT_DIR}/k8s/hpto_job.yaml.template"
 DRY_RUN=false
 SKIP_BUILD=false
 
 # -- Defaults -----------------------------------------------------------------
-# Load your dev.env (REGISTRY, NAMESPACE, HF_TOKEN, etc.) before launching
+# Load your env.dev (REGISTRY, NAMESPACE, HF_TOKEN, etc.) before launching
 # this script so the variables below pick up your overrides.
 
-REGISTRY="${REGISTRY:?Set REGISTRY in your dev.env}"
+REGISTRY="${REGISTRY:?Set REGISTRY in your env.dev}"
 EXPERIMENT_REPO="${REGISTRY}/${CURRENT_USER}/dist-train/experiments"
 
 NAMESPACE="${NAMESPACE:-mlp}"
@@ -233,5 +233,6 @@ echo "==> Useful commands"
 echo "    Status:    kubectl get ${RESOURCE_TYPE} ${JOB_NAME} -n ${NAMESPACE}"
 echo "    Describe:  kubectl describe ${RESOURCE_TYPE} ${JOB_NAME} -n ${NAMESPACE}"
 echo "    Pods:      kubectl get pods -n ${NAMESPACE} -l job-name=${JOB_NAME}"
-echo "    Logs:      kubectl logs -f -l job-name=${JOB_NAME} -n ${NAMESPACE} --all-containers"
+echo "    Shell:     kubectl exec -it -n ${NAMESPACE} \$(kubectl get pods -n ${NAMESPACE} -l job-name=${JOB_NAME} -o jsonpath='{.items[0].metadata.name}') -c pytorch -- /bin/bash"
+echo "    Logs:      kubectl logs -f -l job-name=${JOB_NAME} -n ${NAMESPACE} -c pytorch"
 echo "    Delete:    kubectl delete ${RESOURCE_TYPE} ${JOB_NAME} -n ${NAMESPACE}"

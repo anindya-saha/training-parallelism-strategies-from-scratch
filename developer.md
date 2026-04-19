@@ -57,10 +57,10 @@ uv sync --extra dev
 ## Environment configuration
 
 Environment-specific variables (registry, namespace, HF token, cache paths)
-live in your `dev.env`. Source it before running any script:
+live in your `env.dev`. Source it before running any script:
 
 ```bash
-source dev.env
+source env.dev
 ```
 
 The scripts (`run_hpto_job.sh`, `run_model_download.sh`, `run_jupyter_lab.sh`) expect variables like

@@ -9,7 +9,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-TEMPLATE_FILE="${PROJECT_DIR}/k8s/jupyter_lab.deployment.j2.yaml"
+TEMPLATE_FILE="${PROJECT_DIR}/k8s/jupyter_lab.yaml.template"
 
 if ! command -v jinja2 &>/dev/null; then
   echo "Error: jinja2 CLI not found. Install with: uv sync (repo) or pip install jinja2-cli"
@@ -18,7 +18,7 @@ fi
 
 # -- Defaults -----------------------------------------------------------------
 
-REGISTRY="${REGISTRY:?Set REGISTRY in your dev.env}"
+REGISTRY="${REGISTRY:?Set REGISTRY in your env.dev}"
 EXPERIMENT_REPO="${REGISTRY}/${CURRENT_USER}/dist-train/experiments"
 
 NAMESPACE="${NAMESPACE:-mlp}"
