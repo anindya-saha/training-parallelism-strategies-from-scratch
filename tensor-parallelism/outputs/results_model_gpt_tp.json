@@ -11,9 +11,9 @@
   "params_per_gpu": 17401856,
   "mem_model_mb": 66.85,
   "mem_peak_mb": 789.43,
-  "fwd_ms": 38.081,
-  "bwd_ms": 45.687,
-  "step_ms": 87.008,
-  "tokens_per_sec": 23538.2,
+  "fwd_ms": 38.104,
+  "bwd_ms": 45.992,
+  "step_ms": 87.346,
+  "tokens_per_sec": 23447.0,
   "loss": 7.4782
 }

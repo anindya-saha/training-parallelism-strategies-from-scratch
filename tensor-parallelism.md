@@ -40,6 +40,31 @@ Y = Y_1 \cdot W^2 = \begin{bmatrix} 34 & 46 \\ 148 & 200 \\ 262 & 354 \\ 376 & 5
 
 **Goal:** get the same results when the weights are split across 2 GPUs.
 
+### Equivalence checks: hand primitives vs DTensor
+
+The article uses the same reference tensors as two runnable checks under `tensor-parallelism/src/`:
+
+- `test_tp_primitives.py` - explicit `torch.autograd.Function` primitives (`_CopyToParallelRegion`, `_ScatterToParallelRegion`, `_ReduceFromParallelRegion`, `_AllGatherFromParallelRegion`) plus local matmuls.
+- `test_tp_primitives_dtensor.py``torch.distributed.tensor` (`DeviceMesh`, `parallelize_module`, `ColwiseParallel`, `RowwiseParallel`) on `nn.Linear` layers.
+
+Both scripts require **2 CUDA ranks** (same `torchrun` pattern). From the repo root:
+
+```bash
+cd tensor-parallelism
+torchrun --nproc_per_node=2 src/test_tp_primitives.py
+torchrun --nproc_per_node=2 src/test_tp_primitives_dtensor.py
+```
+
+**Layout vs `nn.Linear`:** the diagrams use $Y = X W$ with $W$ shaped like the math above. `nn.Linear` implements $y = x W^\top$ in the sense `output = x @ weight.T`, so the DTensor tests set `linear.weight` to $W^\top$ to match the same numeric $X W$ as the hand path.
+
+| Step | Hand primitives test | DTensor test |
+|------|----------------------|--------------|
+| 1. Column-parallel linear only | `_CopyToParallelRegion`; `W1` split on dim 1; `X @ W1_local`; optional `_AllGatherFromParallelRegion` vs full `X @ W1` | `ColwiseParallel` on `lin1`; assert local output equals the corresponding column shard of `X @ W1`; `dist.all_gather` to compare to full `X @ W1` |
+| 2. Row-parallel linear only | `_ScatterToParallelRegion` on last dim; `W2` split on dim 0; `X_local @ W2_local`; `_ReduceFromParallelRegion` vs `X @ W2` | `X` split manually like scatter; `RowwiseParallel(input_layouts=Shard(-1))` on `lin2`; assert output matches `X @ W2` |
+| 3. Column then row | Fused path: Copy, column matmul, **no** all-gather/scatter between layers, row matmul, Reduce vs `reference_Y()` | `ColThenRow` module; `parallelize_module` with `ColwiseParallel` + `RowwiseParallel` vs `reference_Y()` |
+
+Passing both runs is the strongest sanity check that the narrative, the custom autograd primitives, and PyTorch's TP sharding styles describe the same math and collectives (up to the stated `atol`).
+
 
 ### The Autograd Primitives
 
@@ -140,9 +165,6 @@ class _AllGatherFromParallelRegion(torch.autograd.Function):
 
 ![Column Linear](tensor-parallelism/images/tp-column.png)
 
-<details>
-<summary>Click to expand to see how the Matrix calculation works out</summary>
-
 $W^1$ is $(2,2)$. We split it by columns into two $(2,1)$ shards:
 
 ```math
@@ -165,10 +187,6 @@ Each GPU holds one column of $Y$. To reconstruct the full $(4,2)$ result, we **a
 Y_{\text{full}} = \begin{bmatrix} 2 & 4 \\ 8 & 18 \\ 14 & 32 \\ 20 & 46 \end{bmatrix}
 = X \cdot W^1
 ```
-
-</details>
-
-<br>
 
 <details>
 <summary>Code: Column-Parallel Linear test (Click to expand)</summary>
@@ -198,8 +216,6 @@ def test_column_linear(self):
 
 ![Row Linear](tensor-parallelism/images/tp-row.png)
 
-<details>
-<summary>Click to expand to see how the Matrix calculation works out</summary>
 
 $W^2$ is $(2,2)$. We split it by rows into two $(1,2)$ shards:
 
@@ -233,10 +249,6 @@ Y_{\text{full}} = \begin{bmatrix} 0{+}6 & 0{+}8 \\ 10{+}18 & 14{+}24 \\ 20{+}30 
 = X \cdot W^2
 ```
 
-</details>
-
-<br>
-
 <details>
 <summary>Code: Row-Parallel Linear test (Click to expand)</summary>
 
@@ -257,9 +269,10 @@ def test_row_linear(self):
 ![Row Linear Primitives](tensor-parallelism/images/tp-row-prim.png)
 
 
-### Column Parallel + Row Prallel Combined: The Cancellation
+### Column Parallel + Row Parallel Combined: The Cancellation
 
-In an MLP block, $W^1$ is Column-Parallel and $W^2$ is Row-Parallel. When chained, **a full communication round disappears**.
+**Key idea:** In an MLP block, $W^1$ is Column-Parallel and $W^2$ is Row-Parallel. When chained, **a full communication round disappears**.
+![Tensor Parallelism with Column + Row Linear](tensor-parallelism/images/tp-col-row.png)
 
 If used standalone, the all-gather after Column Linear and the scatter before Row Linear sit back-to-back. They are *conjugate* operations - one undoes the other. 
 The column output is already in the form that row input needs.
@@ -393,7 +406,7 @@ Each GPU gets a proportional subset of both $Q$ and $KV$ heads, and locally expa
 $KV$ heads to match $Q$ heads via `repeat_interleave` (no communication needed):
 
 ```python
-# GQA: K/V projections are smaller -- asymmetric sharding
+# GQA: K/V projections are smallerasymmetric sharding
 self.W_q = ColumnParallelLinear(d_model, n_heads * d_head)      # shards Q heads
 self.W_k = ColumnParallelLinear(d_model, n_kv_heads * d_head)   # shards KV heads
 self.W_v = ColumnParallelLinear(d_model, n_kv_heads * d_head)   # shards KV heads
