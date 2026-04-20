@@ -23,6 +23,7 @@ dependencies = [
     "torch-tb-profiler",
     "tiktoken",
     "datasets",
+    "torchinfo",
 ]
 
 [project.optional-dependencies]
