@@ -4,6 +4,10 @@ A minimal GPT decoder with Tensor Parallelism. Weight matrices are sharded
 across GPUs using Column-Parallel and Row-Parallel linear layers.
 
 Uses the default process group (all GPUs) for all communication.
+
+Example:
+    torchrun --nproc_per_node=2 src/model_gpt_tp.py
+    torchrun --nproc_per_node=4 src/model_gpt_tp.py --n-heads 8
 """
 
 import argparse

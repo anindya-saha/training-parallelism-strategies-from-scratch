@@ -15,6 +15,11 @@ Key differences from vanilla TP (model_gpt_tp.py):
 Same communication volume as vanilla TP, but ~30-50% less activation memory.
 
 Uses the default process group (all GPUs) for all communication.
+
+
+Example:
+    torchrun --nproc_per_node=2 src/model_gpt_tp_sp.py
+    torchrun --nproc_per_node=4 src/model_gpt_tp_sp.py --n-heads 8
 """
 
 import argparse
@@ -251,11 +256,11 @@ class TPSPTransformerBlock(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
-        self.norm1 = nn.LayerNorm(d_model)  # (B, S/N, h) -- memory saved
+        self.norm1 = nn.LayerNorm(d_model)  # (B, S/N, h) - memory saved
         self.attn = TPAttention(d_model, n_heads, bias=attn_bias, dropout=dropout)
-        self.norm2 = nn.LayerNorm(d_model)  # (B, S/N, h) -- memory saved
+        self.norm2 = nn.LayerNorm(d_model)  # (B, S/N, h) - memory saved
         self.ffn = TPFFN(d_model, d_ff, bias=ffn_bias)
-        self.resid_dropout = nn.Dropout(dropout)  # (B, S/N, h) -- memory saved
+        self.resid_dropout = nn.Dropout(dropout)  # (B, S/N, h) - memory saved
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, S/N, h) -- SP region, sequence is sharded
@@ -272,7 +277,7 @@ class TPSPTransformerBlock(nn.Module):
         x = self.ffn(x)  # (B, S, h) -> (B, S/N, h) via reduce-scatter
         x = residual + self.resid_dropout(x)  # (B, S/N, h)
 
-        return x  # (B, S/N, h) -- stays in SP region
+        return x  # (B, S/N, h) - stays in SP region
 
 
 # ================================================================
@@ -334,8 +339,8 @@ class TPSPGPT(nn.Module):
             x = block(x)
 
         # Gather back for output
-        x = self.norm_f(x)  # (B, S/N, h) -- SP region
-        x = _AllGatherFromSPRegion.apply(x)  # (B, S, h) -- full sequence
+        x = self.norm_f(x)  # (B, S/N, h) - SP region
+        x = _AllGatherFromSPRegion.apply(x)  # (B, S, h) - full sequence
         return self.lm_head(x)  # (B, S, vocab/N)
 
 

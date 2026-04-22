@@ -2,6 +2,10 @@
 
 A minimal GPT decoder used as the baseline for tensor-parallelism experiments.
 Single-GPU benchmark - no distributed communication.
+
+Example:
+    torchrun --nproc_per_node=2 src/model_gpt.py
+    torchrun --nproc_per_node=4 src/model_gpt.py --n-heads 8
 """
 
 import argparse

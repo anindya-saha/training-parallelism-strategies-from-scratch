@@ -1,4 +1,4 @@
-"""TP GPT-style transformer using PyTorch's DTensor parallel API.
+"""TP + SP  GPT-style transformer using PyTorch's DTensor parallel API.
 
 Same model architecture as model_gpt_tp.py but replaces hand-written
 ColumnParallelLinear / RowParallelLinear / autograd primitives with
@@ -10,8 +10,8 @@ then call parallelize_module() with a sharding plan. PyTorch handles
 weight sharding, communication insertion, and backward gradients.
 
 Example:
-    torchrun --nproc_per_node=2 src/model_gpt_tp_dtensor.py
-    torchrun --nproc_per_node=4 src/model_gpt_tp_dtensor.py --n-heads 8
+    torchrun --nproc_per_node=2 src/model_gpt_tp_sp_dtensor.py
+    torchrun --nproc_per_node=4 src/model_gpt_tp_sp_dtensor.py --n-heads 8
 
 Compare output JSON against model_gpt_tp.py for the same config.
 """
@@ -27,16 +27,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import Replicate
+from torch.distributed.tensor import Replicate, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
+    SequenceParallel,
     PrepareModuleInput,
     RowwiseParallel,
     loss_parallel,
     parallelize_module,
 )
 
-from utils import count_parameters, get_gpu_memory_mb, get_gpu_peak_memory_mb
+from config import count_parameters, get_gpu_memory_mb, get_gpu_peak_memory_mb
 
 logger = logging.getLogger(__name__)
 
@@ -44,17 +45,17 @@ logger = logging.getLogger(__name__)
 # Default Model & Benchmark Constants (same as model_gpt_tp.py)
 # ================================================================
 
-DEFAULT_D_MODEL = 512
-DEFAULT_N_HEADS = 8
-DEFAULT_D_FF = 2048
-DEFAULT_N_LAYERS = 6
-DEFAULT_VOCAB_SIZE = 10_000
-DEFAULT_MAX_SEQ_LEN = 512
+D_MODEL = 512
+N_HEADS = 8
+D_FF = 2048
+N_LAYERS = 6
+VOCAB_SIZE = 10_000
+MAX_SEQ_LEN = 512
 
-DEFAULT_BATCH_SIZE = 8
-DEFAULT_SEQ_LEN = 256
-DEFAULT_NUM_WARMUP = 3
-DEFAULT_NUM_BENCHMARK = 10
+BATCH_SIZE = 8
+SEQ_LEN = 256
+NUM_WARMUP = 3
+NUM_BENCHMARK = 10
 
 
 # ================================================================
@@ -66,10 +67,13 @@ DEFAULT_NUM_BENCHMARK = 10
 
 
 class Attention(nn.Module):
-    def __init__(self, d_model: int, n_heads: int, bias: bool = False):
+    def __init__(
+        self, d_model: int, n_heads: int, bias: bool = False, dropout: float = 0.1
+    ):
         super().__init__()
         self.n_heads = n_heads
         self.d_head = d_model // n_heads
+        self.dropout = dropout
 
         self.W_q = nn.Linear(d_model, d_model, bias=bias)
         self.W_k = nn.Linear(d_model, d_model, bias=bias)
@@ -87,7 +91,8 @@ class Attention(nn.Module):
 
         # F.scaled_dot_product_attention handles DTensors natively and
         # avoids the reshape-propagation issue that manual Q @ K.T hits.
-        out = F.scaled_dot_product_attention(Q, K, V, is_causal=True)
+        p = self.dropout if self.training else 0.0
+        out = F.scaled_dot_product_attention(Q, K, V, is_causal=True, dropout_p=p)
 
         out = out.transpose(1, 2).contiguous().view(B, T, -1)
         return self.W_o(out)
@@ -111,35 +116,39 @@ class TransformerBlock(nn.Module):
         d_ff: int,
         attn_bias: bool = False,
         ffn_bias: bool = True,
+        dropout: float = 0.1,
     ):
         super().__init__()
         self.norm1 = nn.LayerNorm(d_model)
-        self.attn = Attention(d_model, n_heads, bias=attn_bias)
+        self.attn = Attention(d_model, n_heads, bias=attn_bias, dropout=dropout)
         self.norm2 = nn.LayerNorm(d_model)
         self.ffn = FFN(d_model, d_ff, bias=ffn_bias)
+        self.resid_dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x))
-        x = x + self.ffn(self.norm2(x))
+        x = x + self.resid_dropout(self.attn(self.norm1(x)))
+        x = x + self.resid_dropout(self.ffn(self.norm2(x)))
         return x
 
 
 class GPT(nn.Module):
     def __init__(
         self,
-        d_model: int = DEFAULT_D_MODEL,
-        n_heads: int = DEFAULT_N_HEADS,
-        d_ff: int = DEFAULT_D_FF,
-        n_layers: int = DEFAULT_N_LAYERS,
-        vocab_size: int = DEFAULT_VOCAB_SIZE,
-        max_seq_len: int = DEFAULT_MAX_SEQ_LEN,
+        d_model: int = D_MODEL,
+        n_heads: int = N_HEADS,
+        d_ff: int = D_FF,
+        n_layers: int = N_LAYERS,
+        vocab_size: int = VOCAB_SIZE,
+        max_seq_len: int = MAX_SEQ_LEN,
         attn_bias: bool = False,
         ffn_bias: bool = True,
+        dropout: float = 0.1,
     ):
         super().__init__()
         self.vocab_size = vocab_size
         self.tok_emb = nn.Embedding(vocab_size, d_model)
         self.pos_emb = nn.Embedding(max_seq_len, d_model)
+        self.emb_dropout = nn.Dropout(dropout)
         self.blocks = nn.ModuleList(
             [
                 TransformerBlock(
@@ -148,6 +157,7 @@ class GPT(nn.Module):
                     d_ff,
                     attn_bias=attn_bias,
                     ffn_bias=ffn_bias,
+                    dropout=dropout,
                 )
                 for _ in range(n_layers)
             ]
@@ -158,7 +168,7 @@ class GPT(nn.Module):
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
         B, T = input_ids.shape
         pos = torch.arange(T, device=input_ids.device).unsqueeze(0)
-        x = self.tok_emb(input_ids) + self.pos_emb(pos)
+        x = self.emb_dropout(self.tok_emb(input_ids) + self.pos_emb(pos))
         for block in self.blocks:
             x = block(x)
         x = self.norm_f(x)
@@ -166,20 +176,22 @@ class GPT(nn.Module):
 
 
 # ================================================================
-# Apply TP via parallelize_module
+# Apply TP + SP via parallelize_module
 # ================================================================
 # This is the entire "parallelism" code. One function, no custom
 # autograd, no manual sharding.
 #
-# The plan mirrors exactly what model_gpt_tp.py does by hand:
+# The plan mirrors exactly what model_gpt_tp_sp.py does by hand:
 #
 #   Attention:
 #     W_q, W_k, W_v -> ColwiseParallel  (split output dim across GPUs)
-#     W_o           -> RowwiseParallel   (split input dim, all-reduce output)
+#     W_o           -> RowwiseParallel(output_layouts=Shard(1))
+#                      reduce-scatter output to SP region (B, S/N, h)
 #
 #   FFN:
 #     W1 -> ColwiseParallel   (split d_ff across GPUs)
-#     W2 -> RowwiseParallel   (split d_ff input, all-reduce output)
+#     W2 -> RowwiseParallel(output_layouts=Shard(1))
+#            reduce-scatter output to SP region (B, S/N, h)
 #
 #   lm_head -> ColwiseParallel (split vocab across GPUs)
 #
@@ -191,28 +203,57 @@ class GPT(nn.Module):
 #   saving both memory and communication vs. a full all-gather.
 
 
-def apply_tp(model: GPT, mesh) -> GPT:
+def apply_tp_sp(model: GPT, mesh) -> GPT:
+    parallelize_module(
+        model,
+        mesh,
+        {
+            "tok_emb": RowwiseParallel(
+                input_layouts=Replicate(),
+                output_layouts=Shard(1),
+                use_local_output=False,
+            ),
+            "pos_emb": RowwiseParallel(
+                input_layouts=Replicate(),
+                output_layouts=Shard(1),
+                use_local_output=False,
+            ),
+        },
+    )
     for block in model.blocks:
         block_plan = {
+            "norm1": SequenceParallel(),
             # --- Attention ---
+            # Attention.forward(self, x) has one tensor arg; layouts tuple length must match.
             "attn": PrepareModuleInput(
-                input_layouts=(Replicate(),),
+                input_layouts=(Shard(1),),
                 desired_input_layouts=(Replicate(),),
             ),
             # use_local_output=False keeps output as a DTensor so that
             # .view(B, T, n_heads, d_head) uses global n_heads and DTensor
             # automatically maps the shard onto the head dimension.
+            # ColwiseParallel defaults: input Replicate(), output Shard(-1).
+            # RowwiseParallel defaults: input Shard(-1), output Replicate().
+            # We override RowwiseParallel output to Shard(1) so the partial
+            # sums are reduce-scattered along the sequence dim (TP -> SP).
             "attn.W_q": ColwiseParallel(use_local_output=False),
             "attn.W_k": ColwiseParallel(use_local_output=False),
             "attn.W_v": ColwiseParallel(use_local_output=False),
-            "attn.W_o": RowwiseParallel(),
+            "attn.W_o": RowwiseParallel(
+                output_layouts=Shard(1),
+                use_local_output=False,
+            ),
+            "norm2": SequenceParallel(),
             # --- FFN ---
             "ffn": PrepareModuleInput(
-                input_layouts=(Replicate(),),
+                input_layouts=(Shard(1),),
                 desired_input_layouts=(Replicate(),),
             ),
             "ffn.W1": ColwiseParallel(),
-            "ffn.W2": RowwiseParallel(),
+            "ffn.W2": RowwiseParallel(
+                output_layouts=Shard(1),
+                use_local_output=False,
+            ),
         }
         parallelize_module(block, mesh, block_plan)
 
@@ -222,7 +263,13 @@ def apply_tp(model: GPT, mesh) -> GPT:
     parallelize_module(
         model,
         mesh,
-        {"lm_head": ColwiseParallel(use_local_output=False)},
+        {
+            "norm_f": SequenceParallel(),
+            "lm_head": ColwiseParallel(
+                input_layouts=Shard(1),
+                use_local_output=False,
+            ),
+        },
     )
     return model
 
@@ -236,18 +283,19 @@ def parse_args():
     p = argparse.ArgumentParser(
         description="Tensor parallelism GPT benchmark (DTensor)"
     )
-    p.add_argument("--d-model", type=int, default=DEFAULT_D_MODEL)
-    p.add_argument("--n-heads", type=int, default=DEFAULT_N_HEADS)
-    p.add_argument("--d-ff", type=int, default=DEFAULT_D_FF)
-    p.add_argument("--n-layers", type=int, default=DEFAULT_N_LAYERS)
-    p.add_argument("--vocab-size", type=int, default=DEFAULT_VOCAB_SIZE)
-    p.add_argument("--max-seq-len", type=int, default=DEFAULT_MAX_SEQ_LEN)
+    p.add_argument("--d-model", type=int, default=D_MODEL)
+    p.add_argument("--n-heads", type=int, default=N_HEADS)
+    p.add_argument("--d-ff", type=int, default=D_FF)
+    p.add_argument("--n-layers", type=int, default=N_LAYERS)
+    p.add_argument("--vocab-size", type=int, default=VOCAB_SIZE)
+    p.add_argument("--max-seq-len", type=int, default=MAX_SEQ_LEN)
     p.add_argument("--attn-bias", action="store_true", default=False)
     p.add_argument("--no-ffn-bias", action="store_true", default=False)
-    p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    p.add_argument("--seq-len", type=int, default=DEFAULT_SEQ_LEN)
-    p.add_argument("--warmup", type=int, default=DEFAULT_NUM_WARMUP)
-    p.add_argument("--benchmark", type=int, default=DEFAULT_NUM_BENCHMARK)
+    p.add_argument("--dropout", type=float, default=0.1)
+    p.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+    p.add_argument("--seq-len", type=int, default=SEQ_LEN)
+    p.add_argument("--warmup", type=int, default=NUM_WARMUP)
+    p.add_argument("--benchmark", type=int, default=NUM_BENCHMARK)
     p.add_argument("--output-dir", type=str, default="outputs")
     return p.parse_args()
 
@@ -301,11 +349,12 @@ def main():
         max_seq_len=args.max_seq_len,
         attn_bias=args.attn_bias,
         ffn_bias=not args.no_ffn_bias,
+        dropout=args.dropout,
     ).to(device)
 
-    # 2. Apply TP via DTensor -- this is the only parallelism code
+    # 2. Apply TP + SP via DTensor - this is the only parallelism code
     mesh = init_device_mesh("cuda", (ws,), mesh_dim_names=("tp",))
-    apply_tp(model, mesh)
+    apply_tp_sp(model, mesh)
 
     # foreach=False: Adam's fused _foreach ops require all params to be
     # the same tensor type. With pure TP (no FSDP) the model has a mix of
@@ -380,7 +429,7 @@ def main():
     if rank == 0:
         average = lambda values: sum(values) / len(values)
         results = dict(
-            mode=f"tp_dtensor_{ws}",
+            mode=f"tp_sp_dtensor_{ws}",
             num_gpus=ws,
             d_model=args.d_model,
             n_heads=args.n_heads,
@@ -399,12 +448,12 @@ def main():
             loss=round(loss.item(), 4),
         )
         os.makedirs(args.output_dir, exist_ok=True)
-        out_path = os.path.join(args.output_dir, "results_model_gpt_tp_dtensor.json")
+        out_path = os.path.join(args.output_dir, "results_model_gpt_tp_sp_dtensor.json")
         with open(out_path, "w") as fout:
             json.dump(results, fout, indent=2)
         logger.info("=" * 60)
         logger.info(
-            "  Model GPT - Tensor Parallelism (DTensor) - %d GPUs", ws
+            "  Model GPT - Tensor Parallelism + Sequence Parallelism (DTensor) - %d GPUs", ws
         )
         logger.info("=" * 60)
         for k in [

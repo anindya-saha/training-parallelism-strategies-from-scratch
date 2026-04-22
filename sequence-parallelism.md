@@ -384,6 +384,18 @@ Always use SP when using TP. There is essentially no downside:
 The only "cost" is implementation complexity, which is already handled by the frameworks. SP is standard practice for any serious large-scale training.
 
 
+### Blog Series
+
+This reference document is part of a four-part blog series on model parallelism:
+
+| Part | Article |
+|---|---|
+| Part 1 | [Tensor Parallelism from Scratch](tensor-parallelism-blog.md) -- building TP with custom autograd primitives |
+| Part 2 | [From Hand-Written TP to PyTorch DTensor](tensor-parallelism-dtensor.md) -- translating TP to the DTensor API |
+| Part 3 | [Sequence Parallelism from Scratch](sequence-parallelism-blog.md) -- extending TP with SP (this document's material) |
+| Part 4 | [From Hand-Written TP+SP to PyTorch DTensor](sequence-parallelism-dtensor.md) -- translating TP+SP to the DTensor API |
+
+
 ### Source Code
 
 | File | Description |
@@ -391,6 +403,7 @@ The only "cost" is implementation complexity, which is already handled by the fr
 | [sequence-parallelism/src/config.py](sequence-parallelism/src/config.py) | Shared model and benchmark configuration |
 | [sequence-parallelism/src/model_gpt_tp.py](sequence-parallelism/src/model_gpt_tp.py) | Vanilla TP GPT (baseline for comparison) |
 | [sequence-parallelism/src/model_gpt_tp_sp.py](sequence-parallelism/src/model_gpt_tp_sp.py) | TP + SP GPT |
+| [sequence-parallelism/src/model_gpt_tp_sp_dtensor.py](sequence-parallelism/src/model_gpt_tp_sp_dtensor.py) | TP + SP GPT (DTensor) -- see [DTensor translation blog](sequence-parallelism-dtensor.md) |
 | [sequence-parallelism/src/analyze_comm.py](sequence-parallelism/src/analyze_comm.py) | Communication cost analysis |
 | [sequence-parallelism/src/trace_shapes.py](sequence-parallelism/src/trace_shapes.py) | Activation shape trace |
 

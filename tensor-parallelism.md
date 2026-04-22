@@ -444,4 +444,15 @@ requires slower network connections and throughput drops significantly.
 
 
 
+### Blog Series
+
+This reference document covers the same material as a two-part blog series written in narrative style:
+
+| Part | Article |
+|---|---|
+| Part 1 | [Tensor Parallelism from Scratch](tensor-parallelism-blog.md) -- building TP with custom autograd primitives |
+| Part 2 | [From Hand-Written TP to PyTorch DTensor](tensor-parallelism-dtensor.md) -- translating to the DTensor API |
+
+See also the Sequence Parallelism series: [Part 3](sequence-parallelism-blog.md) (hand-written TP+SP) and [Part 4](sequence-parallelism-dtensor.md) (DTensor TP+SP).
+
 See [developer.md](developer.md) for full setup and CLI flags.

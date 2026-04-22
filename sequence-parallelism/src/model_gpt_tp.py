@@ -11,6 +11,11 @@ In vanilla TP:
   Parallelism (SP) eliminates by scattering the sequence dimension.
 
 Uses the default process group (all GPUs) for all communication.
+
+
+Example:
+    torchrun --nproc_per_node=2 src/model_gpt_tp.py
+    torchrun --nproc_per_node=4 src/model_gpt_tp.py --n-heads 8
 """
 
 import argparse
@@ -144,18 +149,18 @@ class TPAttention(nn.Module):
         self.attn_dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, _ = x.shape
+        B, S, _ = x.shape
 
-        Q = self.W_q(x).view(B, T, self.n_heads_local, self.d_head).transpose(1, 2)
-        K = self.W_k(x).view(B, T, self.n_heads_local, self.d_head).transpose(1, 2)
-        V = self.W_v(x).view(B, T, self.n_heads_local, self.d_head).transpose(1, 2)
+        Q = self.W_q(x).view(B, S, self.n_heads_local, self.d_head).transpose(1, 2)
+        K = self.W_k(x).view(B, S, self.n_heads_local, self.d_head).transpose(1, 2)
+        V = self.W_v(x).view(B, S, self.n_heads_local, self.d_head).transpose(1, 2)
 
         attn = (Q @ K.transpose(-2, -1)) * self.scale
-        mask = torch.triu(torch.ones(T, T, device=x.device), diagonal=1).bool()
+        mask = torch.triu(torch.ones(S, S, device=x.device), diagonal=1).bool()
         attn = attn.masked_fill(mask, float("-inf"))
         attn = self.attn_dropout(F.softmax(attn, dim=-1))
 
-        out = (attn @ V).transpose(1, 2).contiguous().view(B, T, -1)
+        out = (attn @ V).transpose(1, 2).contiguous().view(B, S, -1)
         return self.W_o(out)  # ALL-REDUCE happens here via RowParallelLinear
 
 
@@ -204,8 +209,18 @@ class TPGPTTransformerBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, S, h) - FULL tensor, identical on all GPUs
-        x = x + self.resid_dropout(self.attn(self.norm1(x)))
-        x = x + self.resid_dropout(self.ffn(self.norm2(x)))
+
+        # --- Attention sub-block ---
+        residual = x  # (B, S, h)
+        x = self.norm1(x)  # (B, S, h)
+        x = self.attn(x)  # (B, S, h)
+        x = residual + self.resid_dropout(x)  # (B, S, h)
+
+        # --- FFN sub-block ---
+        residual = x  # (B, S, h)
+        x = self.norm2(x)  # (B, S, h)
+        x = self.ffn(x)  # (B, S, h)
+        x = residual + self.resid_dropout(x)  # (B, S, h)
         return x  # (B, S, h) - still FULL
 
 
@@ -249,13 +264,16 @@ class TPGPT(nn.Module):
         self.lm_head = ColumnParallelLinear(d_model, vocab_size, bias=False)
 
     def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        B, T = input_ids.shape
-        pos = torch.arange(T, device=input_ids.device).unsqueeze(0)
-        x = self.emb_dropout(self.tok_emb(input_ids) + self.pos_emb(pos))
+        B, S = input_ids.shape
+        # Embedding (same on all GPUs, full sequence)
+        pos = torch.arange(S, device=input_ids.device).unsqueeze(0)
+        x = self.tok_emb(input_ids) + self.pos_emb(pos)  # (B, S, h)
+        x = self.emb_dropout(x)
         for block in self.blocks:
             x = block(x)
-        x = self.norm_f(x)
-        return self.lm_head(x)
+
+        x = self.norm_f(x)  # (B, S, h)
+        return self.lm_head(x)  # (B, S, h)
 
 
 # ================================================================
