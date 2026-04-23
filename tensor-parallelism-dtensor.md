@@ -1,6 +1,6 @@
 ## From Hand-Written TP to PyTorch DTensor: A Declarative Sharding Plan
 
-*This is Part 2 of a four-part series on model parallelism. [Part 1](tensor-parallelism-blog.md) builds Tensor Parallelism from scratch using custom autograd primitives. Parts [3](sequence-parallelism-blog.md) and [4](sequence-parallelism-dtensor.md) extend the approach with Sequence Parallelism.*
+*This is Part 2 of a six-part series on model parallelism. [Part 1](tensor-parallelism-blog.md) builds Tensor Parallelism from scratch using custom autograd primitives. Parts [3](sequence-parallelism-blog.md) and [4](sequence-parallelism-dtensor.md) extend the approach with Sequence Parallelism. Parts [5](context-parallelism-blog.md) and [6](context-parallelism-dtensor.md) tackle the quadratic attention bottleneck with Context Parallelism.*
 
 In [Part 1](tensor-parallelism-blog.md) we built Tensor Parallelism from scratch: `_CopyToParallelRegion`, `_ReduceFromParallelRegion`, `ColumnParallelLinear`, `RowParallelLinear`, and `TPAttention` -- custom autograd functions and modules that fuse the model architecture with the parallelism strategy. The implementation works, but the model cannot run on a single GPU. Changing the TP degree or composing with FSDP requires rewriting module definitions.
 

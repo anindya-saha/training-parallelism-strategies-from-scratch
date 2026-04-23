@@ -386,7 +386,7 @@ The only "cost" is implementation complexity, which is already handled by the fr
 
 ### Blog Series
 
-This reference document is part of a four-part blog series on model parallelism:
+This reference document is part of a six-part blog series on model parallelism:
 
 | Part | Article |
 |---|---|
@@ -394,6 +394,8 @@ This reference document is part of a four-part blog series on model parallelism:
 | Part 2 | [From Hand-Written TP to PyTorch DTensor](tensor-parallelism-dtensor.md) -- translating TP to the DTensor API |
 | Part 3 | [Sequence Parallelism from Scratch](sequence-parallelism-blog.md) -- extending TP with SP (this document's material) |
 | Part 4 | [From Hand-Written TP+SP to PyTorch DTensor](sequence-parallelism-dtensor.md) -- translating TP+SP to the DTensor API |
+| Part 5 | [Context Parallelism from Scratch](context-parallelism-blog.md) -- ring attention with P2P rotation + online softmax |
+| Part 6 | [From Hand-Written Ring Attention to PyTorch DTensor](context-parallelism-dtensor.md) -- translating CP to the DTensor API |
 
 
 ### Source Code

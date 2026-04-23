@@ -24,10 +24,13 @@ image (CUDA, EFA, Amazon Linux 2023). Code is NOT baked in; mount via FSx at
 runtime.
 
 ```bash
-cd ~/training-parallelism-strategies-from-scratch/capstone/containers
+cd ~/training-parallelism-strategies-from-scratch/capstone/
+
+source dev.env
+source docker/pytorch/versions-cuda.env
 
 DOCKER_BUILDKIT=1 docker build \
-  -f docker/pytorch/Dockerfile \
+  -f docker/pytorch/Dockerfile.cuda \
   --target runtime \
   -t "${REGISTRY}/${USER}/dist-train/capstone:$(git rev-parse HEAD)" \
   .
@@ -69,6 +72,15 @@ rsync -av ~/training-parallelism-strategies-from-scratch/capstone/src/ \
     --image-uri mlp.docker.zooxlabs.com/asaha/dist-train/capstone:b8f199f7766d43374c124c509ddfb13ae59ae404 \
     --train-script /mnt/fsx/asaha/training-parallelism-strategies-from-scratch/capstone/src/train.py \
     --train-args "--data_root /mnt/fsx/asaha/parallelism-experiments/data/edu_fineweb10B --max_steps 300"
+
+./scripts/run_hpto_job.sh --skip-build \
+    --job-name dist-train \
+    --image-uri mlp.docker.zooxlabs.com/asaha/dist-train/capstone:01e0f729e544b9d7019a2ed0e7c692bf33cef946 \
+    --node-type p5en \
+    --train-script /mnt/fsx/asaha/training-parallelism-strategies-from-scratch/capstone/src/train.py \
+    --train-args "--data_root /mnt/fsx/asaha/parallelism-experiments/data/edu_fineweb10B --max_steps 300"
+
+    
 ```
 
 `--image-uri` implies `--skip-build`. Add `--dry-run` to preview the rendered YAML.

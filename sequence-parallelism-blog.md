@@ -1,6 +1,6 @@
 ## Sequence Parallelism from Scratch: Saving Activation Memory Without Extra Communication
 
-*This is Part 3 of a four-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism (hand-written and DTensor). In this article we extend TP with Sequence Parallelism. [Part 4](sequence-parallelism-dtensor.md) translates the combined TP+SP to the DTensor API.*
+*This is Part 3 of a six-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism (hand-written and DTensor). In this article we extend TP with Sequence Parallelism. [Part 4](sequence-parallelism-dtensor.md) translates the combined TP+SP to the DTensor API. Parts [5](context-parallelism-blog.md) and [6](context-parallelism-dtensor.md) tackle the quadratic attention bottleneck with Context Parallelism.*
 
 The complete source code is in [model_gpt_tp_sp.py](sequence-parallelism/src/model_gpt_tp_sp.py). The vanilla TP baseline for comparison is in [model_gpt_tp.py](sequence-parallelism/src/model_gpt_tp.py).
 

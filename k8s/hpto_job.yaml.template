@@ -38,6 +38,10 @@ spec:
                         operator: In
                         values:
                           - hyperpod
+                      - key: zoox.com/posix-storage
+                        operator: In
+                        values:
+                          - "true"
           topologySpreadConstraints:
             - maxSkew: 1
               topologyKey: kubernetes.io/hostname
@@ -53,6 +57,10 @@ spec:
             - name: shmem
               emptyDir:
                 medium: Memory
+            - name: gdrdrv
+              hostPath:
+                path: /dev/gdrdrv
+                type: CharDevice
             - name: local-nvme
               hostPath:
                 path: /mnt/k8s-disks/0
@@ -96,7 +104,11 @@ spec:
                 - name: PYTORCH_CUDA_ALLOC_CONF
                   value: "expandable_segments:True"
                 - name: PYTHONFAULTHANDLER
-                  value: "1"
+                  value: "1"                
+                - name: FI_PROVIDER
+                  value: "efa"
+                - name: NCCL_TUNER_PLUGIN
+                  value: "/opt/amazon/ofi-nccl/lib/libnccl-ofi-tuner.so"
                 - name: FI_EFA_FORK_SAFE
                   value: "1"
                 - name: FI_EFA_USE_HUGE_PAGE
@@ -126,7 +138,9 @@ spec:
 {%- endif %}
               volumeMounts:
                 - name: shmem
-                  mountPath: /dev/shm
+                  mountPath: /dev/shm                
+                - name: gdrdrv
+                  mountPath: /dev/gdrdrv
                 - name: local-nvme
                   mountPath: /tmp
                 - name: fsx-static
@@ -134,6 +148,7 @@ spec:
                 - name: host-nvme-storage
                   mountPath: /opt/dlami/nvme
               securityContext:
+                privileged: true
                 capabilities:
                   add:
                     - IPC_LOCK
@@ -148,7 +163,6 @@ spec:
                 periodSeconds: 60
                 timeoutSeconds: 30
                 failureThreshold: 10
-
   runPolicy:
     cleanPodPolicy: All
     jobMaxRetryCount: 0

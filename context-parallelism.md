@@ -324,6 +324,20 @@ Paths are relative to the **repository root** (same style as [sequence-paralleli
 **Naming:** Prefer `cp-` prefix and kebab-case so these sit next to [cp_comparison.png](context-parallelism/images/cp_comparison.png) without clashes. Use `.svg` instead of `.png` if you prefer; update the embed path accordingly.
 
 
+### Blog Series
+
+This reference document is part of a six-part blog series on model parallelism:
+
+| Part | Article |
+|---|---|
+| Part 1 | [Tensor Parallelism from Scratch](tensor-parallelism-blog.md) -- building TP with custom autograd primitives |
+| Part 2 | [From Hand-Written TP to PyTorch DTensor](tensor-parallelism-dtensor.md) -- translating TP to the DTensor API |
+| Part 3 | [Sequence Parallelism from Scratch](sequence-parallelism-blog.md) -- extending TP with SP |
+| Part 4 | [From Hand-Written TP+SP to PyTorch DTensor](sequence-parallelism-dtensor.md) -- translating TP+SP to the DTensor API |
+| Part 5 | [Context Parallelism from Scratch](context-parallelism-blog.md) -- ring attention with P2P rotation + online softmax (this document's material) |
+| Part 6 | [From Hand-Written Ring Attention to PyTorch DTensor](context-parallelism-dtensor.md) -- translating CP to the DTensor API |
+
+
 ### Further Reading
 
 - Ring attention and blockwise attention: see papers and implementations referenced from the Hugging Face **Ultra-Scale Playbook** and educational repos such as **picotron** / **nanotron** ([ultra_blog.md](ultra_blog.md) pointers).

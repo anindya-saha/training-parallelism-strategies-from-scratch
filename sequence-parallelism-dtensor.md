@@ -1,6 +1,6 @@
 ## From Hand-Written TP+SP to PyTorch DTensor: A Practical Translation
 
-*This is Part 4 of a four-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. [Part 3](sequence-parallelism-blog.md) builds TP+SP from scratch. This article translates the combined TP+SP to the DTensor API.*
+*This is Part 4 of a six-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. [Part 3](sequence-parallelism-blog.md) builds TP+SP from scratch. This article translates the combined TP+SP to the DTensor API. Parts [5](context-parallelism-blog.md) and [6](context-parallelism-dtensor.md) tackle the quadratic attention bottleneck with Context Parallelism.*
 
 In [Part 3](sequence-parallelism-blog.md) we built Tensor Parallelism + Sequence Parallelism from scratch: custom `torch.autograd.Function` subclasses for communication primitives, manual weight sharding in `ColumnParallelLinear` and `RowParallelLinear`, and explicit region transitions between the TP and SP regions. That implementation -- roughly 250 lines of parallelism plumbing in [model_gpt_tp_sp.py](sequence-parallelism/src/model_gpt_tp_sp.py) -- gave us a deep understanding of how TP+SP works.
 

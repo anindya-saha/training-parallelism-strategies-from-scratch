@@ -446,13 +446,15 @@ requires slower network connections and throughput drops significantly.
 
 ### Blog Series
 
-This reference document covers the same material as a two-part blog series written in narrative style:
+This reference document is part of a six-part blog series on model parallelism:
 
 | Part | Article |
 |---|---|
-| Part 1 | [Tensor Parallelism from Scratch](tensor-parallelism-blog.md) -- building TP with custom autograd primitives |
-| Part 2 | [From Hand-Written TP to PyTorch DTensor](tensor-parallelism-dtensor.md) -- translating to the DTensor API |
-
-See also the Sequence Parallelism series: [Part 3](sequence-parallelism-blog.md) (hand-written TP+SP) and [Part 4](sequence-parallelism-dtensor.md) (DTensor TP+SP).
+| Part 1 | [Tensor Parallelism from Scratch](tensor-parallelism-blog.md) -- building TP with custom autograd primitives (this document's material) |
+| Part 2 | [From Hand-Written TP to PyTorch DTensor](tensor-parallelism-dtensor.md) -- translating TP to the DTensor API |
+| Part 3 | [Sequence Parallelism from Scratch](sequence-parallelism-blog.md) -- extending TP with SP |
+| Part 4 | [From Hand-Written TP+SP to PyTorch DTensor](sequence-parallelism-dtensor.md) -- translating TP+SP to the DTensor API |
+| Part 5 | [Context Parallelism from Scratch](context-parallelism-blog.md) -- ring attention with P2P rotation + online softmax |
+| Part 6 | [From Hand-Written Ring Attention to PyTorch DTensor](context-parallelism-dtensor.md) -- translating CP to the DTensor API |
 
 See [developer.md](developer.md) for full setup and CLI flags.
