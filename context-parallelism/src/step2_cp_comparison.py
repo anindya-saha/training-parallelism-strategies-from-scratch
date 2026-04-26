@@ -7,6 +7,7 @@ Compares:
 Memory savings come from each GPU only computing attention
 for its local queries (S/CP) instead of all queries (S).
 """
+
 import json
 import logging
 import math
@@ -28,9 +29,7 @@ def main() -> None:
     )
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    dist.init_process_group(
-        backend="nccl", device_id=torch.device(f"cuda:{local_rank}")
-    )
+    dist.init_process_group(backend="nccl", device_id=torch.device(f"cuda:{local_rank}"))
     rank = dist.get_rank()
     ws = dist.get_world_size()
 

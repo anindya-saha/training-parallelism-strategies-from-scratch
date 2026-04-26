@@ -107,6 +107,33 @@ docker run --rm --gpus 1 ${REGISTRY}/${USER}/dist-train/experiments:latest
 
 Make sure `REGISTRY` is set in your environment (via `dev.env`) before running.
 
+## Running Locally
+```
+# context parallel experiments
+docker run --gpus all --ipc=host --ulimit memlock=-1 \
+	  -e NCCL_DEBUG=WARN \
+    -v /home/asaha/training-parallelism-strategies-from-scratch:/workspace \
+    -w /workspace/context-parallelism \
+    mlp.docker.zooxlabs.com/asaha/dist-train/capstone:01e0f729e544b9d7019a2ed0e7c692bf33cef946 \
+    torchrun --standalone --nproc_per_node=1 src/train_gpt.py
+
+docker run --gpus all --ipc=host --ulimit memlock=-1 \
+	-e NCCL_DEBUG=WARN \
+    -v /home/asaha/training-parallelism-strategies-from-scratch:/workspace \
+    -w /workspace/context-parallelism \
+    mlp.docker.zooxlabs.com/asaha/dist-train/capstone:01e0f729e544b9d7019a2ed0e7c692bf33cef946 \
+    torchrun --standalone --nproc_per_node=4 src/train_gpt.py --config small --seq-len 512 
+
+
+
+docker run --gpus all --ipc=host --ulimit memlock=-1 \
+	-e NCCL_DEBUG=WARN \
+    -v /home/asaha/training-parallelism-strategies-from-scratch:/workspace \
+    -w /workspace/context-parallelism \
+    mlp.docker.zooxlabs.com/asaha/dist-train/capstone:01e0f729e544b9d7019a2ed0e7c692bf33cef946 \
+    torchrun --standalone --nproc_per_node=4 src/train_gpt_cp.py --config small --seq-len 512 --cp-size 4
+```
+
 ## Kubernetes Deployment
 
 Jobs run on SageMaker HyperPod via `HyperPodPyTorchJob` CRDs. The `run_hpto_job.sh`
@@ -158,6 +185,12 @@ for model download commands (`run_model_download.sh`, manual, and Argo Workflows
     --node-type p5en \
     --num-nodes 2 \
     --train-script /workspace/training-parallelism-strategies-from-scratch/tensor-parallelism/test_model.py
+```
+
+### Code Formatting
+```
+uv run isort context-parallelism/src/train_gpt_cp_dtensor.py
+uv run black context-parallelism/src/train_gpt_cp_dtensor.py
 ```
 
 ### Node type presets

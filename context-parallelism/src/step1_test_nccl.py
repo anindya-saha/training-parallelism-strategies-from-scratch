@@ -1,4 +1,5 @@
 """Step 1: Verify NCCL works on fresh pod"""
+
 import logging
 import os
 
@@ -16,9 +17,7 @@ def main() -> None:
     )
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    dist.init_process_group(
-        backend="nccl", device_id=torch.device(f"cuda:{local_rank}")
-    )
+    dist.init_process_group(backend="nccl", device_id=torch.device(f"cuda:{local_rank}"))
     rank = dist.get_rank()
     ws = dist.get_world_size()
 
