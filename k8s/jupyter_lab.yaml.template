@@ -35,15 +35,30 @@ spec:
                     operator: In
                     values:
                       - hyperpod
+                  - key: zoox.com/posix-storage
+                    operator: In
+                    values:
+                      - "true"
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"
+          effect: "NoSchedule"
+        - key: "zoox.com/training-only"
+          operator: "Equal"
+          value: "true"
           effect: "NoSchedule"
       volumes:
         - name: shmem
           emptyDir:
             medium: Memory
-            sizeLimit: 8Gi
+            sizeLimit: 16Gi
+        - name: gdrdrv
+          hostPath:
+            path: /dev/gdrdrv
+            type: CharDevice
+        - name: local-nvme
+          hostPath:
+            path: /mnt/k8s-disks/0
         - name: fsx-static
           persistentVolumeClaim:
             claimName: {{ FSX_CLAIM }}
@@ -80,22 +95,33 @@ spec:
                 --ip=0.0.0.0 \
                 --port=8888 \
                 --no-browser \
-                --ServerApp.root_dir=/workspace/training-parallelism-strategies-from-scratch \
+                --ServerApp.root_dir=/mnt/fsx/asaha/training-parallelism-strategies-from-scratch \
                 --ServerApp.allow_origin='*' \
                 --IdentityProvider.token="${JUPYTER_TOKEN}"
           resources:
             requests:
               cpu: "{{ CPU_REQUEST }}"
               memory: "{{ MEMORY_REQUEST }}"
+              nvidia.com/gpu: "{{ GPU_COUNT }}"
             limits:
               cpu: "{{ CPU_LIMIT }}"
               memory: "{{ MEMORY_LIMIT }}"
               nvidia.com/gpu: "{{ GPU_COUNT }}"
           volumeMounts:
             - name: shmem
-              mountPath: /dev/shm
+              mountPath: /dev/shm        
+            - name: gdrdrv
+              mountPath: /dev/gdrdrv
+            - name: local-nvme
+              mountPath: /tmp
             - name: fsx-static
               mountPath: /mnt/fsx
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - IPC_LOCK
+                - SYS_PTRACE
           readinessProbe:
             tcpSocket:
               port: 8888

@@ -53,6 +53,10 @@ spec:
             - key: "nvidia.com/gpu"
               operator: "Exists"
               effect: "NoSchedule"
+            - key: "zoox.com/training-only"
+              operator: "Equal"
+              value: "true"
+              effect: "NoSchedule"
           volumes:
             - name: shmem
               emptyDir:
@@ -61,16 +65,13 @@ spec:
               hostPath:
                 path: /dev/gdrdrv
                 type: CharDevice
-            - name: local-nvme
-              hostPath:
-                path: /mnt/k8s-disks/0
+            - name: tmp-scratch
+              emptyDir: {}
             - name: fsx-static
               persistentVolumeClaim:
                 claimName: {{ FSX_CLAIM }}
             - name: host-nvme-storage
-              hostPath:
-                path: /opt/dlami/nvme
-                type: Directory
+              emptyDir: {}
           containers:
             - name: pytorch
               image: {{ IMAGE_URI }}
@@ -141,7 +142,7 @@ spec:
                   mountPath: /dev/shm                
                 - name: gdrdrv
                   mountPath: /dev/gdrdrv
-                - name: local-nvme
+                - name: tmp-scratch
                   mountPath: /tmp
                 - name: fsx-static
                   mountPath: /mnt/fsx

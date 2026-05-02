@@ -1,0 +1,33 @@
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: bench-gpt-cp
+  namespace: mlp
+spec:
+  runtimeRef:
+    name: torch-distributed
+    kind: TrainingRuntime
+  trainer:
+    command:
+      - torchrun
+    args:
+      - /mnt/fsx/asaha/training-parallelism-strategies-from-scratch/context-parallelism/src/train_gpt_cp.py
+      - --config
+      - medium
+      - --seq-len
+      - "1024"
+      - --cp-size
+      - "8"
+    numNodes: 1
+    numProcPerNode: 8
+    env:
+      - name: HF_TOKEN
+        value: ""
+    resourcesPerNode:
+      requests:
+        nvidia.com/gpu: "8"
+        vpc.amazonaws.com/efa: "16"
+      limits:
+        nvidia.com/gpu: "8"
+        vpc.amazonaws.com/efa: "16"
+                          

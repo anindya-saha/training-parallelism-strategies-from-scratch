@@ -1,0 +1,133 @@
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: torch-distributed
+  namespace: mlp
+  labels:
+    trainer.kubeflow.org/framework: torch
+spec:
+  mlPolicy:
+    numNodes: 1
+    torch:
+      numProcPerNode: 8
+  template:
+    spec:
+      replicatedJobs:
+        - name: node
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                spec:
+                  nodeSelector:
+                    node.kubernetes.io/instance-type: ml.p5en.48xlarge
+                  serviceAccountName: mlp-sa
+                  tolerations:
+                    - key: "nvidia.com/gpu"
+                      operator: "Exists"
+                      effect: "NoSchedule"
+                    - key: "zoox.com/training-only"
+                      operator: "Equal"
+                      value: "true"
+                      effect: "NoSchedule"
+                    - key: "efa-measure"
+                      operator: "Exists"
+                      effect: "NoSchedule"
+                  affinity:
+                    nodeAffinity:
+                      requiredDuringSchedulingIgnoredDuringExecution:
+                        nodeSelectorTerms:
+                          - matchExpressions:
+                              - key: sagemaker.amazonaws.com/node-health-status
+                                operator: In
+                                values:
+                                  - Schedulable
+                              - key: sagemaker.amazonaws.com/compute-type
+                                operator: In
+                                values:
+                                  - hyperpod
+                              - key: zoox.com/posix-storage
+                                operator: In
+                                values:
+                                  - "true"
+                  volumes:
+                    - name: shmem
+                      emptyDir:
+                        medium: Memory
+                    - name: gdrdrv
+                      hostPath:
+                        path: /dev/gdrdrv
+                        type: CharDevice
+                    - name: tmp-scratch
+                      emptyDir: {}
+                    - name: fsx-static
+                      persistentVolumeClaim:
+                        claimName: fsx-static-claim
+                    - name: host-nvme-storage
+                      emptyDir: {}
+                  containers:
+                    - name: node
+                      image: mlp.docker.zooxlabs.com/asaha/dist-train/experiments:ed7394b64e289dfdbe4469188ac0aec6e49b4302888acc8afb2b5bad4fd3989b
+                      env:
+                        - name: NCCL_DEBUG
+                          value: WARN
+                        - name: NCCL_SOCKET_IFNAME
+                          value: ^lo
+                        - name: GLOO_SOCKET_IFNAME
+                          value: eth0
+                        - name: TORCH_NCCL_ASYNC_ERROR_HANDLING
+                          value: "1"
+                        - name: TORCH_NCCL_ENABLE_MONITORING
+                          value: "1"
+                        - name: TORCH_FR_BUFFER_SIZE
+                          value: "20000"
+                        - name: TORCH_NCCL_DUMP_ON_TIMEOUT
+                          value: "1"
+                        - name: TORCH_NCCL_DEBUG_INFO_TEMP_FILE
+                          value: /tmp/nccl_trace_rank_
+                        - name: PYTORCH_CUDA_ALLOC_CONF
+                          value: "expandable_segments:True"
+                        - name: PYTHONFAULTHANDLER
+                          value: "1"
+                        - name: FI_PROVIDER
+                          value: "efa"
+                        - name: NCCL_TUNER_PLUGIN
+                          value: "/opt/amazon/ofi-nccl/lib/libnccl-ofi-tuner.so"
+                        - name: FI_EFA_FORK_SAFE
+                          value: "1"
+                        - name: FI_EFA_USE_HUGE_PAGE
+                          value: "0"
+                        - name: FI_LOG_LEVEL
+                          value: "1"
+                        - name: HF_HOME
+                          value: "/mnt/fsx/asaha/hf_cache"
+                        - name: HUGGINGFACE_HUB_CACHE
+                          value: "/mnt/fsx/asaha/hf_cache"
+                        - name: HF_HUB_DISABLE_XET
+                          value: "1"
+                      volumeMounts:
+                        - name: shmem
+                          mountPath: /dev/shm
+                        - name: gdrdrv
+                          mountPath: /dev/gdrdrv
+                        - name: tmp-scratch
+                          mountPath: /tmp
+                        - name: fsx-static
+                          mountPath: /mnt/fsx
+                        - name: host-nvme-storage
+                          mountPath: /opt/dlami/nvme
+                      securityContext:
+                        privileged: true
+                        capabilities:
+                          add:
+                            - IPC_LOCK
+                            - SYS_PTRACE
+                      resources:
+                        requests:
+                          nvidia.com/gpu: "8"
+                          vpc.amazonaws.com/efa: "16"
+                        limits:
+                          nvidia.com/gpu: "8"
+                          vpc.amazonaws.com/efa: "16"
