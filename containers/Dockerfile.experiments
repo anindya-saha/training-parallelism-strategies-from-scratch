@@ -1,0 +1,16 @@
+ARG BASE_IMAGE=base-image-not-set
+FROM ${BASE_IMAGE}
+
+WORKDIR /workspace/training-parallelism-strategies-from-scratch
+
+COPY tensor-parallelism tensor-parallelism/
+COPY pipeline-parallelism pipeline-parallelism/
+COPY context-parallelism context-parallelism/
+COPY sequence-parallelism sequence-parallelism/
+COPY expert-parallelism expert-parallelism/
+COPY scripts/download_model.py scripts/
+COPY capstone capstone/
+
+EXPOSE 8888
+
+CMD ["bash"]

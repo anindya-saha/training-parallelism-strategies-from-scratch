@@ -1,6 +1,6 @@
 ## Context Parallelism from Scratch: Ring Attention for Million-Token Sequences
 
-*This is Part 5 of a six-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. Parts [3](sequence-parallelism-blog.md) and [4](sequence-parallelism-dtensor.md) cover Sequence Parallelism. [Part 6](context-parallelism-dtensor.md) translates this hand-written implementation to PyTorch's DTensor Context Parallel API.*
+*This is Part 5 of a nine-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. Parts [3](sequence-parallelism-blog.md) and [4](sequence-parallelism-dtensor.md) cover Sequence Parallelism. [Part 6](context-parallelism-dtensor.md) translates this hand-written implementation to PyTorch's DTensor Context Parallel API. Parts [7](expert-parallelism-blog.md), [8](expert-parallelism-ep-blog.md), and [9](expert-parallelism-ep-dtensor.md) cover Expert Parallelism for Mixture of Experts models.*
 
 Context length in large language models has grown from 2K tokens (GPT-2) to 128K (Llama 3.1) to over 1M (Gemini 1.5 Pro). But inside the attention layer, every query must touch every key it is allowed to attend to, and the intermediate score matrix scales as $O(S^2)$. Tensor Parallelism splits heads, Sequence Parallelism splits activations outside the TP region - but neither touches the quadratic attention bottleneck. Context Parallelism (CP) does.
 

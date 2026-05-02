@@ -358,13 +358,14 @@ def main():
     cp_group = dist.new_group(ranks=list(range(args.cp_size)))
     cp_rank = dist.get_rank(cp_group)
 
-    if rank == 0:
+    if rank >= 0:
         logger.info(
-            "GPT-2 benchmark - config: %s, world_size: %d, cp_size: %d, dtype: %s",
+            "GPT-2 benchmark - config: %s, world_size: %d, cp_size: %d, dtype: %s, rank: %d",
             args.config,
             world_size,
             args.cp_size,
             args.dtype,
+            rank,
         )
         logger.info(
             "d_model=%d, n_heads=%d, d_ff=%d, n_layers=%d, vocab=%d, cp_size=%d",

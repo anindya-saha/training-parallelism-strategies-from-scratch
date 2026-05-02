@@ -1,6 +1,6 @@
 ## From Hand-Written Ring Attention to PyTorch DTensor: Context Parallel in One Line
 
-*This is Part 6 of a six-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. Parts [3](sequence-parallelism-blog.md) and [4](sequence-parallelism-dtensor.md) cover Sequence Parallelism. [Part 5](context-parallelism-blog.md) builds ring attention from scratch.*
+*This is Part 6 of a nine-part series on model parallelism. Parts [1](tensor-parallelism-blog.md) and [2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. Parts [3](sequence-parallelism-blog.md) and [4](sequence-parallelism-dtensor.md) cover Sequence Parallelism. [Part 5](context-parallelism-blog.md) builds ring attention from scratch. Parts [7](expert-parallelism-blog.md), [8](expert-parallelism-ep-blog.md), and [9](expert-parallelism-ep-dtensor.md) cover Expert Parallelism for Mixture of Experts models.*
 
 In [Part 5](context-parallelism-blog.md) we built ring attention by hand: a `_ring_rotate` function for P2P K/V exchange, an online softmax merger with $(m, \ell, o)$ recurrence, causal masking logic that distinguishes past/same/future chunks, and a load balancer that pairs head and tail tokens for balanced work. That implementation - roughly 115 lines of distributed communication code - gave us a deep understanding of how Context Parallelism works inside the attention layer.
 
