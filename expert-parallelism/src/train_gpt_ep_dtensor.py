@@ -30,11 +30,10 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from data import create_dataloader
 from torch.distributed._functional_collectives import all_to_all_single as functional_a2a
 from torch.distributed.tensor import DeviceMesh, Shard, distribute_module, distribute_tensor
 from torch.distributed.tensor.parallel import ParallelStyle
-
-from data import create_dataloader
 from utils import count_parameters, get_gpu_memory_mb, get_gpu_peak_memory_mb
 
 logger = logging.getLogger(__name__)
@@ -62,19 +61,40 @@ class MoEGPTConfig:
 
 MOE_CONFIGS = {
     "mini": MoEGPTConfig(
-        d_model=512, n_heads=8, d_ff=2048, n_layers=6,
-        vocab_size=50_257, max_seq_len=512, dropout=0.1,
-        num_experts=8, top_k=2, aux_loss_weight=0.01,
+        d_model=512,
+        n_heads=8,
+        d_ff=2048,
+        n_layers=6,
+        vocab_size=50_257,
+        max_seq_len=512,
+        dropout=0.1,
+        num_experts=8,
+        top_k=2,
+        aux_loss_weight=0.01,
     ),
     "small": MoEGPTConfig(
-        d_model=768, n_heads=12, d_ff=3072, n_layers=12,
-        vocab_size=50_257, max_seq_len=1024, dropout=0.1,
-        num_experts=8, top_k=2, aux_loss_weight=0.01,
+        d_model=768,
+        n_heads=12,
+        d_ff=3072,
+        n_layers=12,
+        vocab_size=50_257,
+        max_seq_len=1024,
+        dropout=0.1,
+        num_experts=8,
+        top_k=2,
+        aux_loss_weight=0.01,
     ),
     "medium": MoEGPTConfig(
-        d_model=1024, n_heads=16, d_ff=4096, n_layers=24,
-        vocab_size=50_257, max_seq_len=1024, dropout=0.1,
-        num_experts=8, top_k=2, aux_loss_weight=0.01,
+        d_model=1024,
+        n_heads=16,
+        d_ff=4096,
+        n_layers=24,
+        vocab_size=50_257,
+        max_seq_len=1024,
+        dropout=0.1,
+        num_experts=8,
+        top_k=2,
+        aux_loss_weight=0.01,
     ),
 }
 
@@ -106,14 +126,14 @@ class Attention(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, _ = x.shape                                          # (B, T, d_model)
+        B, T, _ = x.shape  # (B, T, d_model)
         scale = 1.0 / math.sqrt(self.d_head)
 
         Q = self.W_q(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)  # (B, H, T, d_head)
         K = self.W_k(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)  # (B, H, T, d_head)
         V = self.W_v(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)  # (B, H, T, d_head)
 
-        attn = (Q @ K.transpose(-2, -1)) * scale                   # (B, H, T, T)
+        attn = (Q @ K.transpose(-2, -1)) * scale  # (B, H, T, T)
         attn = attn.masked_fill(self.causal_mask[:, :, :T, :T] == 0, float("-inf"))
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_dropout(attn)
@@ -135,11 +155,9 @@ class Router(nn.Module):
         self.gate = nn.Linear(d_model, num_experts, bias=False)
 
     def forward(self, x: torch.Tensor):
-        router_logits = self.gate(x)                                # (B, T, num_experts)
-        top_k_logits, top_k_indices = torch.topk(
-            router_logits, self.top_k, dim=-1
-        )                                                           # (B, T, top_k) each
-        top_k_weights = F.softmax(top_k_logits, dim=-1)            # (B, T, top_k)
+        router_logits = self.gate(x)  # (B, T, num_experts)
+        top_k_logits, top_k_indices = torch.topk(router_logits, self.top_k, dim=-1)  # (B, T, top_k) each
+        top_k_weights = F.softmax(top_k_logits, dim=-1)  # (B, T, top_k)
         return top_k_weights, top_k_indices, router_logits
 
 
@@ -161,7 +179,10 @@ class AllToAllTokenDispatcher:
         self.ep_group: dist.ProcessGroup | None = None
 
     def dispatch(
-        self, x: torch.Tensor, top_scores: torch.Tensor, expert_indices: torch.Tensor,
+        self,
+        x: torch.Tensor,
+        top_scores: torch.Tensor,
+        expert_indices: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, dict]:
         """Permute tokens by expert, all-to-all to expert-owning GPU.
 
@@ -178,26 +199,31 @@ class AllToAllTokenDispatcher:
         N, C = x.shape
         ep_size = dist.get_world_size(self.ep_group) if self.ep_group else 1
 
-        scores_flat = top_scores.view(-1)                           # (N*top_k,)
-        indices_flat = expert_indices.view(-1)                      # (N*top_k,)
+        scores_flat = top_scores.view(-1)  # (N*top_k,)
+        indices_flat = expert_indices.view(-1)  # (N*top_k,)
 
-        sort_order = torch.argsort(indices_flat, stable=True)       # (N*top_k,)
-        token_source = sort_order // self.top_k                     # original token index
-        scores_sorted = scores_flat[sort_order]                     # (N*top_k,)
+        sort_order = torch.argsort(indices_flat, stable=True)  # (N*top_k,)
+        token_source = sort_order // self.top_k  # original token index
+        scores_sorted = scores_flat[sort_order]  # (N*top_k,)
 
-        x_routed = x[token_source]                                  # (N*top_k, d_model)
-        x_routed = x_routed * scores_sorted.unsqueeze(-1)          # apply routing weight
+        x_routed = x[token_source]  # (N*top_k, d_model)
+        x_routed = x_routed * scores_sorted.unsqueeze(-1)  # apply routing weight
 
         if ep_size <= 1:
             num_per_expert = torch.histc(
-                indices_flat.float(), bins=self.num_experts, min=0, max=self.num_experts,
+                indices_flat.float(),
+                bins=self.num_experts,
+                min=0,
+                max=self.num_experts,
             ).int()
             metadata = {
                 "token_source": token_source,
                 "scores_sorted": scores_sorted,
                 "sort_order": sort_order,
-                "N": N, "C": C,
-                "input_splits": None, "output_splits": None,
+                "N": N,
+                "C": C,
+                "input_splits": None,
+                "output_splits": None,
                 "ep_size": 1,
             }
             return x_routed, num_per_expert, metadata
@@ -214,26 +240,26 @@ class AllToAllTokenDispatcher:
 
         total_recv = sum(output_splits)
         recv_tokens = torch.empty(total_recv, C, dtype=x.dtype, device=x.device)
-        dist.all_to_all_single(
-            recv_tokens, x_routed, output_splits, input_splits, group=self.ep_group
-        )
+        dist.all_to_all_single(recv_tokens, x_routed, output_splits, input_splits, group=self.ep_group)
 
         recv_indices = torch.empty(total_recv, dtype=sorted_indices.dtype, device=x.device)
-        dist.all_to_all_single(
-            recv_indices, sorted_indices, output_splits, input_splits, group=self.ep_group
-        )
+        dist.all_to_all_single(recv_indices, sorted_indices, output_splits, input_splits, group=self.ep_group)
         ep_rank = dist.get_rank(self.ep_group)
         local_indices = recv_indices - ep_rank * experts_per_rank
 
         num_per_expert = torch.histc(
-            local_indices.float(), bins=experts_per_rank, min=0, max=experts_per_rank,
+            local_indices.float(),
+            bins=experts_per_rank,
+            min=0,
+            max=experts_per_rank,
         ).int()
 
         metadata = {
             "token_source": token_source,
             "scores_sorted": scores_sorted,
             "sort_order": sort_order,
-            "N": N, "C": C,
+            "N": N,
+            "C": C,
             "input_splits": input_splits,
             "output_splits": output_splits,
             "ep_size": ep_size,
@@ -252,15 +278,13 @@ class AllToAllTokenDispatcher:
             out_splits = metadata["output_splits"]
             total_orig = sum(in_splits)
             recv_back = torch.empty(total_orig, C, dtype=expert_output.dtype, device=expert_output.device)
-            dist.all_to_all_single(
-                recv_back, expert_output, in_splits, out_splits, group=self.ep_group
-            )
+            dist.all_to_all_single(recv_back, expert_output, in_splits, out_splits, group=self.ep_group)
         else:
             recv_back = expert_output
 
         output = torch.zeros(N, C, dtype=recv_back.dtype, device=recv_back.device)
         output.scatter_add_(0, token_source.unsqueeze(-1).expand(-1, C), recv_back)
-        return output                                               # (N, d_model)
+        return output  # (N, d_model)
 
 
 # ================================================================
@@ -293,25 +317,25 @@ class GroupedExperts(nn.Module):
         self.d_ff = config.d_ff
         self.top_k = config.top_k
 
-        self.w1 = nn.Parameter(
-            torch.empty(config.num_experts, config.d_ff, config.d_model)
-        )                                                           # (E, d_ff, d_model)
-        self.w2 = nn.Parameter(
-            torch.empty(config.num_experts, config.d_model, config.d_ff)
-        )                                                           # (E, d_model, d_ff)
+        self.w1 = nn.Parameter(torch.empty(config.num_experts, config.d_ff, config.d_model))  # (E, d_ff, d_model)
+        self.w2 = nn.Parameter(torch.empty(config.num_experts, config.d_model, config.d_ff))  # (E, d_model, d_ff)
 
         nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.w2, a=math.sqrt(5))
 
         self.token_dispatcher = AllToAllTokenDispatcher(
-            config.num_experts, config.top_k,
+            config.num_experts,
+            config.top_k,
         )
 
     def _experts_forward(
-        self, x: torch.Tensor, num_tokens_per_expert: torch.Tensor,
+        self,
+        x: torch.Tensor,
+        num_tokens_per_expert: torch.Tensor,
     ) -> torch.Tensor:
         """Run local experts on pre-dispatched tokens."""
         from torch.distributed.tensor import DTensor
+
         w1 = self.w1.to_local() if isinstance(self.w1, DTensor) else self.w1
         w2 = self.w2.to_local() if isinstance(self.w2, DTensor) else self.w2
 
@@ -323,8 +347,8 @@ class GroupedExperts(nn.Module):
             if x_expert.shape[0] == 0:
                 outputs.append(x_expert)
                 continue
-            h = F.gelu(x_expert @ w1[i].T)                         # (n_i, d_ff)
-            h = h @ w2[i].T                                        # (n_i, d_model)
+            h = F.gelu(x_expert @ w1[i].T)  # (n_i, d_ff)
+            h = h @ w2[i].T  # (n_i, d_model)
             outputs.append(h)
 
         return torch.cat(outputs, dim=0) if outputs else x[:0]
@@ -342,18 +366,19 @@ class GroupedExperts(nn.Module):
             routing_weights: (B, T, top_k) softmax weights from router
             selected_experts: (B, T, top_k) expert indices from router
         """
-        B, T, C = x.shape                                          # (B, T, d_model)
-        x_flat = x.view(-1, C)                                     # (B*T, d_model)
+        B, T, C = x.shape  # (B, T, d_model)
+        x_flat = x.view(-1, C)  # (B*T, d_model)
 
         recv_tokens, num_per_expert, metadata = self.token_dispatcher.dispatch(
-            x_flat, routing_weights.view(-1, self.top_k),
+            x_flat,
+            routing_weights.view(-1, self.top_k),
             selected_experts.view(-1, self.top_k),
         )
 
         expert_output = self._experts_forward(recv_tokens, num_per_expert)
 
         combined = self.token_dispatcher.combine(expert_output, metadata)
-        return combined.view(B, T, C)                               # (B, T, d_model)
+        return combined.view(B, T, C)  # (B, T, d_model)
 
 
 # ================================================================
@@ -374,9 +399,7 @@ class ExpertParallel(ParallelStyle):
         # skip 2D params like the router gate weight.
         for param_name, param in mod.named_parameters(recurse=False):
             if param.dim() >= 3:
-                dist_param = nn.Parameter(
-                    distribute_tensor(param, device_mesh, [Shard(0)])
-                )
+                dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
                 mod.register_parameter(param_name, dist_param)
 
         if hasattr(mod, "token_dispatcher"):
@@ -403,25 +426,27 @@ class MoETransformerBlock(nn.Module):
         self.moe = GroupedExperts(config)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        x = x + self.attn(self.ln1(x))                             # (B, T, d_model)
-        h = self.ln2(x)                                            # (B, T, d_model)
+        x = x + self.attn(self.ln1(x))  # (B, T, d_model)
+        h = self.ln2(x)  # (B, T, d_model)
         routing_weights, selected_experts, router_logits = self.router(h)
-        moe_out = self.moe(h, routing_weights, selected_experts)   # (B, T, d_model)
+        moe_out = self.moe(h, routing_weights, selected_experts)  # (B, T, d_model)
         x = x + moe_out
 
         aux_loss = self._load_balancing_loss(router_logits, selected_experts)
         return x, aux_loss
 
     def _load_balancing_loss(
-        self, router_logits: torch.Tensor, selected_experts: torch.Tensor,
+        self,
+        router_logits: torch.Tensor,
+        selected_experts: torch.Tensor,
     ) -> torch.Tensor:
         B, T, _ = router_logits.shape
         num_tokens = B * T
         flat_experts = selected_experts.view(-1, self.top_k)
         expert_mask = torch.zeros(num_tokens, self.num_experts, device=router_logits.device)
         expert_mask.scatter_(1, flat_experts, 1.0)
-        f = expert_mask.mean(dim=0)                                 # (num_experts,)
-        P = F.softmax(router_logits, dim=-1).mean(dim=(0, 1))      # (num_experts,)
+        f = expert_mask.mean(dim=0)  # (num_experts,)
+        P = F.softmax(router_logits, dim=-1).mean(dim=(0, 1))  # (num_experts,)
         return self.num_experts * (f * P).sum()
 
 
@@ -437,9 +462,7 @@ class MoEGPT(nn.Module):
         self.tok_emb = nn.Embedding(config.vocab_size, config.d_model)
         self.pos_emb = nn.Embedding(config.max_seq_len, config.d_model)
         self.emb_dropout = nn.Dropout(config.dropout)
-        self.blocks = nn.ModuleList(
-            [MoETransformerBlock(config) for _ in range(config.n_layers)]
-        )
+        self.blocks = nn.ModuleList([MoETransformerBlock(config) for _ in range(config.n_layers)])
         self.ln_f = nn.LayerNorm(config.d_model)
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
@@ -455,7 +478,7 @@ class MoEGPT(nn.Module):
         total_aux_loss = total_aux_loss / self.config.n_layers
 
         x = self.ln_f(x)
-        logits = self.lm_head(x)                                   # (B, T, vocab_size)
+        logits = self.lm_head(x)  # (B, T, vocab_size)
         return logits, total_aux_loss
 
 
@@ -491,9 +514,7 @@ def evaluate(model, val_loader, config, device):
         input_ids = input_ids.to(device)
         labels = labels.to(device)
         logits, aux_loss = model(input_ids)
-        loss = F.cross_entropy(
-            logits.view(-1, config.vocab_size), labels.view(-1)
-        )
+        loss = F.cross_entropy(logits.view(-1, config.vocab_size), labels.view(-1))
         total_loss += loss.item()
         total_aux += aux_loss.item()
         count += 1
@@ -505,8 +526,7 @@ def evaluate(model, val_loader, config, device):
 def parse_args():
     p = argparse.ArgumentParser(description="Expert Parallelism -- DTensor ExpertParallel")
     p.add_argument("--config", type=str, default="mini", choices=list(MOE_CONFIGS.keys()))
-    p.add_argument("--ep-size", type=int, default=None,
-                   help="EP group size. Default = world_size (pure EP, no DP)")
+    p.add_argument("--ep-size", type=int, default=None, help="EP group size. Default = world_size (pure EP, no DP)")
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--seq-len", type=int, default=256)
     p.add_argument("--num-steps", type=int, default=500)
@@ -525,9 +545,7 @@ def main():
     args = parse_args()
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    dist.init_process_group(
-        backend="nccl", device_id=torch.device(f"cuda:{local_rank}")
-    )
+    dist.init_process_group(backend="nccl", device_id=torch.device(f"cuda:{local_rank}"))
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     device = torch.device(f"cuda:{local_rank}")
@@ -573,8 +591,7 @@ def main():
         logger.info("=" * 60)
         logger.info("world_size=%d  ep_size=%d  dp_size=%d", world_size, ep_size, dp_size)
         logger.info("DeviceMesh: %s", mesh)
-        logger.info("num_experts=%d  experts_per_rank=%d  top_k=%d",
-                     config.num_experts, experts_per_rank, config.top_k)
+        logger.info("num_experts=%d  experts_per_rank=%d  top_k=%d", config.num_experts, experts_per_rank, config.top_k)
 
     # --- Model ---
     model = MoEGPT(config).to(device)
@@ -595,18 +612,24 @@ def main():
     train_path = os.path.join(args.data_dir, "train.bin")
     val_path = os.path.join(args.data_dir, "validation.bin")
     train_loader, train_sampler = create_dataloader(
-        train_path, seq_len, args.batch_size,
-        dp_rank=dp_rank, dp_size=dp_size,
+        train_path,
+        seq_len,
+        args.batch_size,
+        dp_rank=dp_rank,
+        dp_size=dp_size,
     )
     val_loader, _ = create_dataloader(
-        val_path, seq_len, args.batch_size,
-        dp_rank=dp_rank, dp_size=dp_size, shuffle=False,
+        val_path,
+        seq_len,
+        args.batch_size,
+        dp_rank=dp_rank,
+        dp_size=dp_size,
+        shuffle=False,
     )
     train_iter = iter(train_loader)
 
     if rank == 0:
-        logger.info("Training for %d steps, eval every %d steps",
-                     args.num_steps, args.eval_interval)
+        logger.info("Training for %d steps, eval every %d steps", args.num_steps, args.eval_interval)
         logger.info("-" * 60)
 
     # --- Training ---
@@ -631,9 +654,7 @@ def main():
         optimizer.zero_grad()
 
         logits, aux_loss = model(input_ids)
-        lm_loss = F.cross_entropy(
-            logits.view(-1, config.vocab_size), labels.view(-1)
-        )
+        lm_loss = F.cross_entropy(logits.view(-1, config.vocab_size), labels.view(-1))
         total_loss = lm_loss + config.aux_loss_weight * aux_loss
 
         total_loss.backward()
@@ -664,8 +685,12 @@ def main():
         if rank == 0 and step % 10 == 0:
             logger.info(
                 "step %4d/%d  lm=%.4f  aux=%.4f  total=%.4f  tok/s=%.0f",
-                step, args.num_steps, lm_loss.item(),
-                aux_loss.item(), total_loss.item(), tokens_per_sec,
+                step,
+                args.num_steps,
+                lm_loss.item(),
+                aux_loss.item(),
+                total_loss.item(),
+                tokens_per_sec,
             )
 
         if step % args.eval_interval == 0 or step == args.num_steps:
@@ -673,7 +698,9 @@ def main():
             if rank == 0:
                 logger.info(
                     "  [eval] step %d  val_loss=%.4f  val_aux=%.4f",
-                    step, val_loss, val_aux,
+                    step,
+                    val_loss,
+                    val_aux,
                 )
             step_record["val_loss"] = round(val_loss, 4)
             step_record["val_aux_loss"] = round(val_aux, 4)

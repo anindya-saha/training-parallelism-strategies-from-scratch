@@ -41,7 +41,7 @@ class MemmapDataset(Dataset):
         start = idx * self.seq_len
         chunk = self.data[start : start + self.seq_len + 1].astype(np.int64)
         x = torch.from_numpy(chunk[:-1])  # (seq_len,)
-        y = torch.from_numpy(chunk[1:])   # (seq_len,)
+        y = torch.from_numpy(chunk[1:])  # (seq_len,)
         return x, y
 
 

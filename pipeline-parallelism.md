@@ -1,6 +1,8 @@
-## Pipeline Parallelism
+## Pipeline Parallelism: Hand-Written Schedules from Scratch
 
-When a model does not fit on one device, **Pipeline Parallelism (PP)** splits **layers** across devices so each rank owns a contiguous **stage** of the network. Unlike [Tensor Parallelism](tensor-parallelism.md), which shards individual weight matrices, PP keeps each stage mostly local and moves **activations** (and backward **gradients**) between ranks with point-to-point communication.
+*This is Part 1 of a two-part series on Pipeline Parallelism. [Part 2](pipeline-parallelism-pipelining.md) replaces the manual send/recv and microbatch loops with `torch.distributed.pipelining`. Parts [1](tensor-parallelism-blog.md)/[2](tensor-parallelism-dtensor.md) cover Tensor Parallelism. Parts [3](sequence-parallelism-blog.md)/[4](sequence-parallelism-dtensor.md) cover Sequence Parallelism. Parts [5](context-parallelism-blog.md)/[6](context-parallelism-dtensor.md) cover Context Parallelism. Parts [7](expert-parallelism-blog.md)/[8](expert-parallelism-ep-blog.md)/[9](expert-parallelism-ep-dtensor.md) cover Expert Parallelism.*
+
+When a model does not fit on one device, **Pipeline Parallelism (PP)** splits **layers** across devices so each rank owns a contiguous **stage** of the network. Unlike [Tensor Parallelism](tensor-parallelism-blog.md), which shards individual weight matrices, PP keeps each stage mostly local and moves **activations** (and backward **gradients**) between ranks with point-to-point communication.
 
 ### Outline
 
@@ -9,9 +11,8 @@ When a model does not fit on one device, **Pipeline Parallelism (PP)** splits **
 3. **From toy MLP to small GPT** - same slice idea; tensors, loss, `get_stage` return tuple.
 4. **Pipeline schedules and timelines** - Naive vs GPipe(AfAB) vs Pipedream(1F1B) in one place: definitions, comparison table, figure, timelines.
 5. **Bubble formula** - idealized bubble fraction vs microbatch count.
-6. **Runnable scripts and benchmark** - `naive.py` / `gpipe.py` / `pipedream.py` on GPT, then `bench_single_vs_pipeline.py`.
-7. **DeepSpeed notebook** - demonstrating using DeepSpeed to do Pipeline Parallelism on a large model over 4 x H200 Gpus.
-7. **[TODO] Pytorch Distributed notebook** - demonstrating using Pytorch Distributed modules to do Pipeline Parallelism on a large model over 4 x H200 Gpus.
+6. **Runnable scripts** - N-stage implementations: `train_gpt_pp_naive.py` / `train_gpt_pp_gpipe.py` / `train_gpt_pp_1f1b.py`.
+7. **DeepSpeed notebook** - demonstrating using DeepSpeed to do Pipeline Parallelism on a large model over 4 x H200 GPUs.
 8. **Relation to other parallelisms** and **references**.
 
 The order is intentional: **Partitioning** (what lives on which rank) before **Scheduling** (when forward and backward run).
@@ -304,70 +305,69 @@ Larger  $m$  (more microbatches per batch) **shrinks** the bubble but increases 
 The companion notebook `pipeline-parallelism/DeepSpeed_Pipeline_Parallelism.ipynb` measures throughput while sweeping  $m$  on four A100 GPUs and compares against this formula.
 
 
-### Runnable schedule scripts (`naive.py`, `gpipe.py`, `pipedream.py`)
+### Runnable schedule scripts (N-stage implementations)
 
-These three scripts implement the naive, GPipe, and 1F1B schedules from **Pipeline schedules and timelines** on **two ranks** using `model_gpt.StandardGPT`. 
+Three scripts implement the naive, GPipe, and 1F1B schedules generalized to **N stages** (configurable via `--pp-size`). Each follows the same benchmark pattern as the [Context Parallelism](context-parallelism-blog.md) scripts: `GPTConfig` dataclass with presets, warmup + timed steps, JSON results output.
 
-They share **`num_samples=64`** and **`gbs=16`**, so each run performs **4 optimizer steps** over the synthetic data. `naive.py` sends the full 16-sample batch through the pipe once per step (no microbatches inside the step). 
-
-`gpipe.py` splits each batch into `n_micro=4` microbatches of 4 samples, runs **all forwards then all backwards** per step. `pipedream.py` uses the same microbatch split with a **1F1B (PipeDream-Flush)** interleaved schedule.
-
-Each rank calls `model_gpt.get_stage(..., )` to get the chunk of layers for that rank. Each rank builds `torch.optim.SGD` over **its stage only**. Activations and gradients on the boundary are `(batch, seq_len, d_model)`; `dist.broadcast` keeps `input_ids` identical on both ranks for `lm_loss`. There is no `torch.distributed` autograd: the cut is `detach()`, `backward(grad)`, and `send`/`recv`, exactly as in the toy story but with GPT-shaped tensors.
+Each script is self-contained (model + partitioning + schedule in one file). The model is a GPT with a flat `nn.ModuleList` called `layers` = [TokPosEmbedding, Block_0, ..., Block_{n-1}, LMHead]. `get_stage(config, rank, pp_size, device)` builds the full model on `meta`, slices by rank, materializes on GPU.
 
 ```python
-# Sketch of the pattern in naive.py, gpipe.py, pipedream.py (GPT path)
-stage, start, end = get_stage(rank, world_size, device)  # model_gpt
-optim = torch.optim.SGD(stage.parameters(), lr=lr)
+# Common pattern across all three scripts
+stage, start, end = get_stage(config, rank, pp_size, device)
+optim = torch.optim.Adam(stage.parameters(), lr=1e-4)
 
-# Rank 0: first submodule is TokPosEmbedding(input_ids) -> (B, T, d_model)
-h0 = stage(input_ids)
-dist.send(h0.detach().contiguous(), dst=1)
-
-# Rank 1: recv hidden, forward rest of layers -> logits (B, T, vocab)
-buf = torch.empty(batch_size, seq_len, d_model, device=device)
-dist.recv(buf, src=0)
-h1 = buf.clone().requires_grad_(True)
-logits = stage(h1)
-loss = lm_loss(logits, input_ids)
-loss.backward()
-dist.send(h1.grad.detach().contiguous(), dst=0)
-
-# Rank 0: recv d(loss)/d(hidden), backward through early layers
-grad_h = torch.empty(batch_size, seq_len, d_model, device=device)
-dist.recv(grad_h, src=1)
-h0.backward(grad_h)
+# First stage: forward on input_ids, send activations to rank+1
+# Intermediate ranks: recv from rank-1, forward, send to rank+1
+# Last stage: recv, forward to logits, compute lm_loss, backward, send grad back
+# Gradients flow in reverse: last -> ... -> first via dist.send/recv
 ```
 
-The scripts differ only in **when** these operations happen (the schedule):
+**1. Naive schedule** (`train_gpt_pp_naive.py`)
 
-**1. Naive schedule** (`naive.py`)
-
-One full minibatch per optimizer step - no microbatches. Forward propagates through stages in sequence, then backward. Maximum pipeline bubble. Matches the naive model parallelism timetables in Simon Boehm's article.
+One full batch through the pipe per optimizer step -- no microbatches. Maximum pipeline bubble. The simplest schedule to understand but the least efficient.
 
 ```bash
-cd pipeline-parallelism/src && torchrun --standalone --nproc_per_node=2 naive.py
+cd pipeline-parallelism/src
+torchrun --standalone --nproc_per_node=2 train_gpt_pp_naive.py --config mini --pp-size 2
+torchrun --standalone --nproc_per_node=4 train_gpt_pp_naive.py --config mini --pp-size 4
 ```
 
-**2. GPipe schedule** (`gpipe.py`)
+**2. GPipe schedule** (`train_gpt_pp_gpipe.py`)
 
-Splits each batch into `n_micro=4` microbatches. All microbatch forwards run first, then all backwards in reverse order. Shrinks the bubble vs naive, but all `m` activations must be stored simultaneously on rank 0.
+Splits the batch into M microbatches (`--num-microbatches`). All microbatch forwards flow through the full pipe, then all backwards in reverse order. Shrinks the bubble vs naive, but peak stored activations = M on each rank.
 
 ```bash
-cd pipeline-parallelism/src && torchrun --standalone --nproc_per_node=2 gpipe.py
+cd pipeline-parallelism/src
+torchrun --standalone --nproc_per_node=2 train_gpt_pp_gpipe.py --config mini --pp-size 2 --num-microbatches 4
+torchrun --standalone --nproc_per_node=4 train_gpt_pp_gpipe.py --config mini --pp-size 4 --num-microbatches 8
 ```
 
-**3. 1F1B schedule** (`pipedream.py`, PipeDream-Flush style)
+**3. 1F1B schedule** (`train_gpt_pp_1f1b.py`, PipeDream-Flush style)
 
-Interleaves forward and backward after a short warmup. Rank 0 does `num_warmup = n_stages - 1` warmup forwards, then alternates 1 backward + 1 forward in steady state, then drains remaining backwards in cooldown. Rank 1 (last stage) processes each microbatch end-to-end: recv, forward, backward, send grad. Peak stored activations on rank 0 is `num_warmup + 1` vs `m` in GPipe — the memory advantage grows with more microbatches.
+After `num_warmup = pp_size - 1 - rank` warmup forwards, the steady state alternates 1 backward + 1 forward, then a cooldown drains remaining backwards. Peak stored activations on rank r = `num_warmup + 1` (vs M in GPipe).
 
 ```bash
-cd pipeline-parallelism/src && torchrun --standalone --nproc_per_node=2 pipedream.py
+cd pipeline-parallelism/src
+torchrun --standalone --nproc_per_node=2 train_gpt_pp_1f1b.py --config mini --pp-size 2 --num-microbatches 4
+torchrun --standalone --nproc_per_node=4 train_gpt_pp_1f1b.py --config mini --pp-size 4 --num-microbatches 8
 ```
 
+**4. Framework version** (`train_gpt_pp_pipelining.py`) -- see [Part 2](pipeline-parallelism-pipelining.md)
 
-### Correctness benchmark (`bench_single_vs_pipeline.py`)
+Uses `torch.distributed.pipelining` (PyTorch 2.7+). Same model, no manual send/recv, no microbatch loops. Schedule selection is one flag (`--schedule gpipe` or `--schedule 1f1b`).
 
-The toy MLP is enough to learn **partitioning**. The schedule scripts add **realistic shapes** and a **language-model loss**. But, I added a benchmark script that answers a separate question: **if we hand-implement a 2-rank naive pipeline, does it match one GPU mathematically** when the split is the same and the data batch is the same ? How can we deterministally prove that the partitioning logic is correct ?
+```bash
+cd pipeline-parallelism/src
+torchrun --standalone --nproc_per_node=4 train_gpt_pp_pipelining.py --config mini --pp-size 4 --schedule gpipe
+torchrun --standalone --nproc_per_node=4 train_gpt_pp_pipelining.py --config mini --pp-size 4 --schedule 1f1b
+```
+
+**Archive:** The original 2-rank tutorial scripts (`naive.py`, `gpipe.py`, `pipedream.py`, `gpt2_model.py`, `bench_single_vs_pipeline.py`) are preserved in `pipeline-parallelism/src/archive/` for reference.
+
+
+### Correctness benchmark (`archive/bench_single_vs_pipeline.py`)
+
+The toy MLP is enough to learn **partitioning**. The schedule scripts add **realistic shapes** and a **language-model loss**. The archived benchmark script (`pipeline-parallelism/src/archive/bench_single_vs_pipeline.py`) answers a separate question: **if we hand-implement a 2-rank naive pipeline, does it match one GPU mathematically** when the split is the same and the data batch is the same? How can we deterministically prove that the partitioning logic is correct?
 
 **Why align weights first ?** If each rank called `get_stage` and only `reset_parameters()`, random init would differ per run and per rank. The benchmark instead builds **one** `StandardGPT` on rank 0, takes its full `state_dict()` on CPU, and `dist.broadcast_object_list` so every rank receives the **same** tensors. Then `load_stage_from_full_state_dict` (in `gpt2_model.py`) maps keys `layers.{global_idx}.*` into each rank's `nn.Sequential` keys `{local_idx}.*`. After that, the pipeline stages are literally the same weights as the single full model, only stored on two GPUs.
 
@@ -390,7 +390,7 @@ The toy MLP is enough to learn **partitioning**. The schedule scripts add **real
 **CLI and pass/fail.** Defaults: `--forward-atol 5e-5`, `--weights-atol 1e-4`, plus `--batch-size`, `--seq-len`, `--lr`, `--seed`. Rank 0 evaluates pass/fail and `broadcast`s a scalar so all processes exit with code **0** or **1**.
 
 ```bash
-cd pipeline-parallelism/src && torchrun --standalone --nproc_per_node=2 bench_single_vs_pipeline.py
+cd pipeline-parallelism/src/archive && torchrun --standalone --nproc_per_node=2 bench_single_vs_pipeline.py
 ```
 
 **Expected output when everything matches.** `torchrun` often prints lines from `torch/distributed/run.py` about setting `OMP_NUM_THREADS=1` per process; that is normal launcher noise, not a test failure. On rank 0 we should see forward and weight diffs at or below the configured tolerances and a final `PASS` line. Exact zeros are common in float32 for this small model when weights and `eval()` mode line up:
@@ -421,8 +421,20 @@ Many articles stop at schedule diagrams. This one strings together runnable step
 ### Relation to data and tensor parallelism
 
 - **Data Parallelism (DP)** replicates the full model; no stage-wise activation pipeline, but **all-reduce** (or reduce-scatter) of gradients across replicas.
-- **Tensor Parallelism (TP)** shards matrices inside a layer; see [Tensor Parallelism](tensor-parallelism.md). TP and PP are often composed (**3D parallelism**: DP + TP + PP) for very large models.
-- **Sequence Parallelism** reduces redundant activation memory next to TP; see [Sequence Parallelism](sequence-parallelism.md).
+- **Tensor Parallelism (TP)** shards matrices inside a layer; see [Tensor Parallelism](tensor-parallelism-blog.md). TP and PP are often composed (**3D parallelism**: DP + TP + PP) for very large models.
+- **Sequence Parallelism** reduces redundant activation memory next to TP; see [Sequence Parallelism](sequence-parallelism-blog.md).
+
+
+### Source Code
+
+| File | Description |
+|---|---|
+| `train_gpt_pp_naive.py` | Naive schedule, N stages ([this article](pipeline-parallelism.md)) |
+| `train_gpt_pp_gpipe.py` | GPipe schedule, N stages ([this article](pipeline-parallelism.md)) |
+| `train_gpt_pp_1f1b.py` | 1F1B schedule, N stages ([this article](pipeline-parallelism.md)) |
+| `train_gpt_pp_pipelining.py` | `torch.distributed.pipelining` ([Part 2](pipeline-parallelism-pipelining.md)) |
+
+All files under [pipeline-parallelism/src/](pipeline-parallelism/src/).
 
 
 ### References

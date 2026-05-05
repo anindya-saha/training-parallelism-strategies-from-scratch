@@ -1,4 +1,4 @@
-"""GPT-2 with Mixture of Experts -- single-GPU MoE from scratch.
+"""GPT-2 with Mixture of Experts - single-GPU MoE from scratch.
 
 Replaces the dense FFN in each transformer block with a Sparse MoE layer:
   - Router (learned gating) picks top-k experts per token
@@ -32,7 +32,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
-
 from data import create_dataloader
 from utils import count_active_parameters, count_parameters, get_gpu_memory_mb, get_gpu_peak_memory_mb
 
@@ -62,19 +61,43 @@ class MoEGPTConfig:
 
 MOE_CONFIGS = {
     "mini": MoEGPTConfig(
-        d_model=512, n_heads=8, d_ff=2048, n_layers=6,
-        vocab_size=50_257, max_seq_len=512, dropout=0.1,
-        num_experts=8, top_k=2, aux_loss_weight=0.01, capacity_factor=1.25,
+        d_model=512,
+        n_heads=8,
+        d_ff=2048,
+        n_layers=6,
+        vocab_size=50_257,
+        max_seq_len=512,
+        dropout=0.1,
+        num_experts=8,
+        top_k=2,
+        aux_loss_weight=0.01,
+        capacity_factor=1.25,
     ),
     "small": MoEGPTConfig(
-        d_model=768, n_heads=12, d_ff=3072, n_layers=12,
-        vocab_size=50_257, max_seq_len=1024, dropout=0.1,
-        num_experts=8, top_k=2, aux_loss_weight=0.01, capacity_factor=1.25,
+        d_model=768,
+        n_heads=12,
+        d_ff=3072,
+        n_layers=12,
+        vocab_size=50_257,
+        max_seq_len=1024,
+        dropout=0.1,
+        num_experts=8,
+        top_k=2,
+        aux_loss_weight=0.01,
+        capacity_factor=1.25,
     ),
     "medium": MoEGPTConfig(
-        d_model=1024, n_heads=16, d_ff=4096, n_layers=24,
-        vocab_size=50_257, max_seq_len=1024, dropout=0.1,
-        num_experts=8, top_k=2, aux_loss_weight=0.01, capacity_factor=1.25,
+        d_model=1024,
+        n_heads=16,
+        d_ff=4096,
+        n_layers=24,
+        vocab_size=50_257,
+        max_seq_len=1024,
+        dropout=0.1,
+        num_experts=8,
+        top_k=2,
+        aux_loss_weight=0.01,
+        capacity_factor=1.25,
     ),
 }
 
@@ -106,20 +129,20 @@ class Attention(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        B, T, _ = x.shape                                          # (B, T, d_model)
+        B, T, _ = x.shape  # (B, T, d_model)
         scale = 1.0 / math.sqrt(self.d_head)
 
         Q = self.W_q(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)  # (B, H, T, d_head)
         K = self.W_k(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)  # (B, H, T, d_head)
         V = self.W_v(x).view(B, T, self.n_heads, self.d_head).transpose(1, 2)  # (B, H, T, d_head)
 
-        attn = (Q @ K.transpose(-2, -1)) * scale                   # (B, H, T, T)
+        attn = (Q @ K.transpose(-2, -1)) * scale  # (B, H, T, T)
         attn = attn.masked_fill(self.causal_mask[:, :, :T, :T] == 0, float("-inf"))
-        attn = F.softmax(attn, dim=-1)                              # (B, H, T, T)
+        attn = F.softmax(attn, dim=-1)  # (B, H, T, T)
         attn = self.attn_dropout(attn)
 
         out = (attn @ V).transpose(1, 2).contiguous().view(B, T, -1)  # (B, T, d_model)
-        return self.resid_dropout(self.W_o(out))                       # (B, T, d_model)
+        return self.resid_dropout(self.W_o(out))  # (B, T, d_model)
 
 
 # ================================================================
@@ -135,7 +158,7 @@ class ExpertFFN(nn.Module):
         self.resid_dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.resid_dropout(self.W2(F.gelu(self.W1(x))))      # (*, d_model)
+        return self.resid_dropout(self.W2(F.gelu(self.W1(x))))  # (*, d_model)
 
 
 # ================================================================
@@ -152,11 +175,9 @@ class Router(nn.Module):
         self.gate = nn.Linear(d_model, num_experts, bias=False)
 
     def forward(self, x: torch.Tensor):
-        router_logits = self.gate(x)                                # (B, T, num_experts)
-        top_k_logits, top_k_indices = torch.topk(
-            router_logits, self.top_k, dim=-1
-        )                                                           # (B, T, top_k) each
-        top_k_weights = F.softmax(top_k_logits, dim=-1)            # (B, T, top_k)
+        router_logits = self.gate(x)  # (B, T, num_experts)
+        top_k_logits, top_k_indices = torch.topk(router_logits, self.top_k, dim=-1)  # (B, T, top_k) each
+        top_k_weights = F.softmax(top_k_logits, dim=-1)  # (B, T, top_k)
         return top_k_weights, top_k_indices, router_logits
 
 
@@ -173,13 +194,11 @@ class SparseMoELayer(nn.Module):
         self.num_experts = config.num_experts
         self.top_k = config.top_k
         self.capacity_factor = config.capacity_factor
-        self.experts = nn.ModuleList(
-            [ExpertFFN(config) for _ in range(config.num_experts)]
-        )
+        self.experts = nn.ModuleList([ExpertFFN(config) for _ in range(config.num_experts)])
         self.router = Router(config.d_model, config.num_experts, config.top_k)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, int]:
-        B, T, C = x.shape                                          # (B, T, d_model)
+        B, T, C = x.shape  # (B, T, d_model)
 
         # --- Routing ---
         routing_weights, selected_experts, router_logits = self.router(x)
@@ -187,31 +206,29 @@ class SparseMoELayer(nn.Module):
         # selected_experts:  (B, T, top_k)
         # router_logits:     (B, T, num_experts)
 
-        x_flat = x.view(-1, C)                                     # (B*T, d_model)
-        weights_flat = routing_weights.view(-1, self.top_k)         # (B*T, top_k)
-        experts_flat = selected_experts.view(-1, self.top_k)        # (B*T, top_k)
+        x_flat = x.view(-1, C)  # (B*T, d_model)
+        weights_flat = routing_weights.view(-1, self.top_k)  # (B*T, top_k)
+        experts_flat = selected_experts.view(-1, self.top_k)  # (B*T, top_k)
 
         # --- Expert capacity ---
         use_capacity = self.capacity_factor > 0
         expert_capacity = 0
         if use_capacity:
             total_token_slots = B * T * self.top_k
-            expert_capacity = int(
-                (total_token_slots / self.num_experts) * self.capacity_factor
-            )
+            expert_capacity = int((total_token_slots / self.num_experts) * self.capacity_factor)
 
         # --- Sparse dispatch ---
-        output = torch.zeros_like(x_flat)                           # (B*T, d_model)
+        output = torch.zeros_like(x_flat)  # (B*T, d_model)
         num_dropped = 0
 
         for i, expert in enumerate(self.experts):
-            mask = (experts_flat == i)                              # (B*T, top_k)
-            token_mask = mask.any(dim=-1)                           # (B*T,)
+            mask = experts_flat == i  # (B*T, top_k)
+            token_mask = mask.any(dim=-1)  # (B*T,)
 
             if not token_mask.any():
                 continue
 
-            token_indices = token_mask.nonzero(as_tuple=True)[0]    # (num_selected,)
+            token_indices = token_mask.nonzero(as_tuple=True)[0]  # (num_selected,)
 
             if use_capacity and len(token_indices) > expert_capacity:
                 num_dropped += len(token_indices) - expert_capacity
@@ -219,36 +236,32 @@ class SparseMoELayer(nn.Module):
                 token_mask = torch.zeros_like(token_mask)
                 token_mask[token_indices] = True
 
-            expert_input = x_flat[token_mask]                       # (num_selected, d_model)
-            expert_output = expert(expert_input)                    # (num_selected, d_model)
+            expert_input = x_flat[token_mask]  # (num_selected, d_model)
+            expert_output = expert(expert_input)  # (num_selected, d_model)
 
             expert_weights = (weights_flat * mask.float()).sum(dim=-1)  # (B*T,)
-            expert_weights = expert_weights[token_mask]                 # (num_selected,)
+            expert_weights = expert_weights[token_mask]  # (num_selected,)
 
             output[token_mask] += expert_output * expert_weights.unsqueeze(-1)
 
-        output = output.view(B, T, C)                              # (B, T, d_model)
+        output = output.view(B, T, C)  # (B, T, d_model)
 
         # --- Auxiliary loss ---
         aux_loss = self._load_balancing_loss(router_logits, selected_experts)
 
         return output, aux_loss, num_dropped
 
-    def _load_balancing_loss(
-        self, router_logits: torch.Tensor, selected_experts: torch.Tensor
-    ) -> torch.Tensor:
+    def _load_balancing_loss(self, router_logits: torch.Tensor, selected_experts: torch.Tensor) -> torch.Tensor:
         """Switch Transformer auxiliary loss: L_aux = N * sum(f_i * P_i)."""
         B, T, _ = router_logits.shape
         num_tokens = B * T
 
-        flat_experts = selected_experts.view(-1, self.top_k)        # (B*T, top_k)
-        expert_mask = torch.zeros(
-            num_tokens, self.num_experts, device=router_logits.device
-        )                                                           # (B*T, num_experts)
+        flat_experts = selected_experts.view(-1, self.top_k)  # (B*T, top_k)
+        expert_mask = torch.zeros(num_tokens, self.num_experts, device=router_logits.device)  # (B*T, num_experts)
         expert_mask.scatter_(1, flat_experts, 1.0)
-        f = expert_mask.mean(dim=0)                                 # (num_experts,)
+        f = expert_mask.mean(dim=0)  # (num_experts,)
 
-        P = F.softmax(router_logits, dim=-1).mean(dim=(0, 1))      # (num_experts,)
+        P = F.softmax(router_logits, dim=-1).mean(dim=(0, 1))  # (num_experts,)
 
         aux_loss = self.num_experts * (f * P).sum()
         return aux_loss
@@ -268,9 +281,9 @@ class MoETransformerBlock(nn.Module):
         self.moe = SparseMoELayer(config)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, int]:
-        x = x + self.attn(self.ln1(x))                             # (B, T, d_model)
-        moe_out, aux_loss, num_dropped = self.moe(self.ln2(x))     # (B, T, d_model)
-        x = x + moe_out                                            # (B, T, d_model)
+        x = x + self.attn(self.ln1(x))  # (B, T, d_model)
+        moe_out, aux_loss, num_dropped = self.moe(self.ln2(x))  # (B, T, d_model)
+        x = x + moe_out  # (B, T, d_model)
         return x, aux_loss, num_dropped
 
 
@@ -286,20 +299,14 @@ class MoEGPT(nn.Module):
         self.tok_emb = nn.Embedding(config.vocab_size, config.d_model)
         self.pos_emb = nn.Embedding(config.max_seq_len, config.d_model)
         self.emb_dropout = nn.Dropout(config.dropout)
-        self.blocks = nn.ModuleList(
-            [MoETransformerBlock(config) for _ in range(config.n_layers)]
-        )
+        self.blocks = nn.ModuleList([MoETransformerBlock(config) for _ in range(config.n_layers)])
         self.ln_f = nn.LayerNorm(config.d_model)
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
-    def forward(
-        self, input_ids: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, int]:
-        B, T = input_ids.shape                                      # (B, T)
-        pos = torch.arange(T, device=input_ids.device).unsqueeze(0) # (1, T)
-        x = self.emb_dropout(
-            self.tok_emb(input_ids) + self.pos_emb(pos)
-        )                                                           # (B, T, d_model)
+    def forward(self, input_ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, int]:
+        B, T = input_ids.shape  # (B, T)
+        pos = torch.arange(T, device=input_ids.device).unsqueeze(0)  # (1, T)
+        x = self.emb_dropout(self.tok_emb(input_ids) + self.pos_emb(pos))  # (B, T, d_model)
 
         total_aux_loss = torch.tensor(0.0, device=x.device)
         total_dropped = 0
@@ -311,8 +318,8 @@ class MoEGPT(nn.Module):
 
         total_aux_loss = total_aux_loss / self.config.n_layers
 
-        x = self.ln_f(x)                                           # (B, T, d_model)
-        logits = self.lm_head(x)                                   # (B, T, vocab_size)
+        x = self.ln_f(x)  # (B, T, d_model)
+        logits = self.lm_head(x)  # (B, T, vocab_size)
         return logits, total_aux_loss, total_dropped
 
 
@@ -353,9 +360,7 @@ class DenseGPT(nn.Module):
         self.tok_emb = nn.Embedding(config.vocab_size, config.d_model)
         self.pos_emb = nn.Embedding(config.max_seq_len, config.d_model)
         self.emb_dropout = nn.Dropout(config.dropout)
-        self.blocks = nn.ModuleList(
-            [TransformerBlock(config) for _ in range(config.n_layers)]
-        )
+        self.blocks = nn.ModuleList([TransformerBlock(config) for _ in range(config.n_layers)])
         self.ln_f = nn.LayerNorm(config.d_model)
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
@@ -385,19 +390,15 @@ def evaluate(model, val_loader, config, device, is_moe: bool):
     for i, (input_ids, labels) in enumerate(val_loader):
         if i >= max_eval_batches:
             break
-        input_ids = input_ids.to(device)                            # (B, T)
-        labels = labels.to(device)                                  # (B, T)
+        input_ids = input_ids.to(device)  # (B, T)
+        labels = labels.to(device)  # (B, T)
         if is_moe:
             logits, aux_loss, _ = model(input_ids)
-            loss = F.cross_entropy(
-                logits.view(-1, config.vocab_size), labels.view(-1)
-            )
+            loss = F.cross_entropy(logits.view(-1, config.vocab_size), labels.view(-1))
             total_aux += aux_loss.item()
         else:
             logits = model(input_ids)
-            loss = F.cross_entropy(
-                logits.view(-1, config.vocab_size), labels.view(-1)
-            )
+            loss = F.cross_entropy(logits.view(-1, config.vocab_size), labels.view(-1))
         total_loss += loss.item()
         count += 1
 
@@ -410,7 +411,9 @@ def evaluate(model, val_loader, config, device, is_moe: bool):
 def parse_args():
     p = argparse.ArgumentParser(description="MoE GPT-2 training on TinyStories")
     p.add_argument(
-        "--config", type=str, default="mini",
+        "--config",
+        type=str,
+        default="mini",
         choices=list(MOE_CONFIGS.keys()),
     )
     p.add_argument("--mode", type=str, default="moe", choices=["moe", "dense"])
@@ -433,9 +436,7 @@ def main():
     args = parse_args()
 
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    dist.init_process_group(
-        backend="nccl", device_id=torch.device(f"cuda:{local_rank}")
-    )
+    dist.init_process_group(backend="nccl", device_id=torch.device(f"cuda:{local_rank}"))
     rank = dist.get_rank()
     device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
@@ -461,14 +462,19 @@ def main():
         logger.info("=" * 60)
         logger.info(
             "d_model=%d  n_heads=%d  d_ff=%d  n_layers=%d  vocab=%d",
-            config.d_model, config.n_heads, config.d_ff,
-            config.n_layers, config.vocab_size,
+            config.d_model,
+            config.n_heads,
+            config.d_ff,
+            config.n_layers,
+            config.vocab_size,
         )
         if is_moe:
             logger.info(
                 "num_experts=%d  top_k=%d  aux_loss_weight=%.4f  capacity_factor=%.2f",
-                config.num_experts, config.top_k,
-                config.aux_loss_weight, config.capacity_factor,
+                config.num_experts,
+                config.top_k,
+                config.aux_loss_weight,
+                config.capacity_factor,
             )
 
     # --- Model ---
@@ -480,10 +486,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     sparse_params = count_parameters(model)
-    active_params = (
-        count_active_parameters(model, config.num_experts, config.top_k)
-        if is_moe else sparse_params
-    )
+    active_params = count_active_parameters(model, config.num_experts, config.top_k) if is_moe else sparse_params
     mem_model = get_gpu_memory_mb(device)
 
     if rank == 0:
@@ -495,10 +498,15 @@ def main():
     train_path = os.path.join(args.data_dir, "train.bin")
     val_path = os.path.join(args.data_dir, "validation.bin")
     train_loader, train_sampler = create_dataloader(
-        train_path, seq_len, args.batch_size,
+        train_path,
+        seq_len,
+        args.batch_size,
     )
     val_loader, _ = create_dataloader(
-        val_path, seq_len, args.batch_size, shuffle=False,
+        val_path,
+        seq_len,
+        args.batch_size,
+        shuffle=False,
     )
     train_iter = iter(train_loader)
 
@@ -522,22 +530,18 @@ def main():
             train_iter = iter(train_loader)
             input_ids, labels = next(train_iter)
 
-        input_ids = input_ids.to(device)                            # (B, T)
-        labels = labels.to(device)                                  # (B, T)
+        input_ids = input_ids.to(device)  # (B, T)
+        labels = labels.to(device)  # (B, T)
 
         optimizer.zero_grad()
 
         if is_moe:
-            logits, aux_loss, num_dropped = model(input_ids)        # (B, T, V)
-            lm_loss = F.cross_entropy(
-                logits.view(-1, config.vocab_size), labels.view(-1)
-            )
+            logits, aux_loss, num_dropped = model(input_ids)  # (B, T, V)
+            lm_loss = F.cross_entropy(logits.view(-1, config.vocab_size), labels.view(-1))
             total_loss = lm_loss + config.aux_loss_weight * aux_loss
         else:
-            logits = model(input_ids)                               # (B, T, V)
-            lm_loss = F.cross_entropy(
-                logits.view(-1, config.vocab_size), labels.view(-1)
-            )
+            logits = model(input_ids)  # (B, T, V)
+            lm_loss = F.cross_entropy(logits.view(-1, config.vocab_size), labels.view(-1))
             total_loss = lm_loss
             aux_loss = torch.tensor(0.0)
             num_dropped = 0
@@ -548,10 +552,7 @@ def main():
         total_tokens += input_ids.numel()
         tokens_per_sec = total_tokens / (time.perf_counter() - t_start)
 
-        total_token_slots = (
-            input_ids.shape[0] * input_ids.shape[1] * config.top_k * config.n_layers
-            if is_moe else 1
-        )
+        total_token_slots = input_ids.shape[0] * input_ids.shape[1] * config.top_k * config.n_layers if is_moe else 1
         drop_rate = num_dropped / max(total_token_slots, 1) * 100
 
         step_record = {
@@ -567,9 +568,14 @@ def main():
         if rank == 0 and step % 10 == 0:
             logger.info(
                 "step %4d/%d  lm=%.4f  aux=%.4f  total=%.4f  dropped=%d (%.1f%%)  tok/s=%.0f",
-                step, args.num_steps, lm_loss.item(),
+                step,
+                args.num_steps,
+                lm_loss.item(),
                 aux_loss.item() if torch.is_tensor(aux_loss) else 0.0,
-                total_loss.item(), num_dropped, drop_rate, tokens_per_sec,
+                total_loss.item(),
+                num_dropped,
+                drop_rate,
+                tokens_per_sec,
             )
 
         if step % args.eval_interval == 0 or step == args.num_steps:
@@ -577,7 +583,9 @@ def main():
             if rank == 0:
                 logger.info(
                     "  [eval] step %d  val_loss=%.4f  val_aux=%.4f",
-                    step, val_loss, val_aux,
+                    step,
+                    val_loss,
+                    val_aux,
                 )
             step_record["val_loss"] = round(val_loss, 4)
             step_record["val_aux_loss"] = round(val_aux, 4)
@@ -615,9 +623,7 @@ def main():
 
         os.makedirs(args.output_dir, exist_ok=True)
         suffix = "moe" if is_moe else "dense"
-        out_path = os.path.join(
-            args.output_dir, f"results_train_gpt_{suffix}_{args.config}.json"
-        )
+        out_path = os.path.join(args.output_dir, f"results_train_gpt_{suffix}_{args.config}.json")
         with open(out_path, "w") as fout:
             json.dump(results, fout, indent=2)
 
