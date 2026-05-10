@@ -47,6 +47,10 @@ spec:
           operator: "Equal"
           value: "true"
           effect: "NoSchedule"
+        - key: "efa-measure"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
       volumes:
         - name: shmem
           emptyDir:
@@ -85,7 +89,7 @@ spec:
               value: "1"
             - name: HF_TOKEN
               value: "{{ HF_TOKEN }}"
-          command:
+          args:
             - /bin/bash
             - -lc
             - |
@@ -95,7 +99,7 @@ spec:
                 --ip=0.0.0.0 \
                 --port=8888 \
                 --no-browser \
-                --ServerApp.root_dir=/mnt/fsx/asaha/training-parallelism-strategies-from-scratch \
+                --ServerApp.root_dir=/mnt/fsx/asaha \
                 --ServerApp.allow_origin='*' \
                 --IdentityProvider.token="${JUPYTER_TOKEN}"
           resources:

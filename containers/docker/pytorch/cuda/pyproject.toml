@@ -41,7 +41,8 @@ workshop = [
     "cloudpickle",
     "datasets>=4.0.0",
     "deepspeed",
-    "flash-attn-4[cu13]>=4.0.0b1",
+    #"flash-attn-4[cu13]>=4.0.0b1",
+    "flashinfer-jit-cache==0.6.8.post1+cu130",
     "hydra-core",
     "imageio",
     "mlflow>=3.9.0",
@@ -67,7 +68,7 @@ workshop = [
     "tqdm>=4.66.0",
     "transformers>=4.45.0",
     "verl",
-    # "vllm>=0.20.0",
+    "vllm>=0.20.1",
     #"wandb",
 ]
 
@@ -99,7 +100,20 @@ name = "pytorch-cu130"
 url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
+[[tool.uv.index]]
+name = "vllm-nightly-cu130"
+url = "https://wheels.vllm.ai/nightly/cu130"
+explicit = true
+
+[[tool.uv.index]]
+name = "flashinfer-cu130"
+url = "https://flashinfer.ai/whl/cu130"
+explicit = true
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cu130" }]
 torchvision = [{ index = "pytorch-cu130" }]
 torchaudio = [{ index = "pytorch-cu130" }]
+
+vllm = [{ index = "vllm-nightly-cu130" }]
+flashinfer-jit-cache = [{ index = "flashinfer-cu130" }]

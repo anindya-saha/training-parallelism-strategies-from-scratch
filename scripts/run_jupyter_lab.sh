@@ -33,18 +33,32 @@ declare -A NODE_PRESETS=(
   [p6]="ml.p6-b200.48xlarge"
 )
 
+declare -A GPU_TOTAL_PRESETS=(
+  [p4d]=8
+  [p4de]=8
+  [p5en]=8
+  [p6]=8
+)
+
+declare -A CPU_TOTAL_PRESETS=(
+  [p4d]=96
+  [p4de]=96
+  [p5en]=192
+  [p6]=192
+)
+
+declare -A MEMORY_TOTAL_PRESETS=(
+  [p4d]="1100Gi"
+  [p4de]="1100Gi"
+  [p5en]="2000Gi"
+  [p6]="2000Gi"
+)
+
 DEPLOYMENT_NAME="jupyter-lab"
 NODE_TYPE_INPUT=""
 IMAGE_URI=""
 DRY_RUN=false
 SKIP_BUILD=false
-
-# Resource defaults (override via flags or env before calling)
-GPU_COUNT="${GPU_COUNT:-4}"
-CPU_REQUEST="${CPU_REQUEST:-8}"
-CPU_LIMIT="${CPU_LIMIT:-96}"
-MEMORY_REQUEST="${MEMORY_REQUEST:-64Gi}"
-MEMORY_LIMIT="${MEMORY_LIMIT:-400Gi}"
 
 # -- Usage --------------------------------------------------------------------
 
@@ -62,7 +76,7 @@ Optional:
   --deployment-name NAME    Deployment + service prefix (default: ${DEPLOYMENT_NAME})
   --image-uri URI           Container image (implies --skip-build)
   --skip-build              Skip Docker build; reuse newest local ${EXPERIMENT_REPO} image
-  --gpu-count N             nvidia.com/gpu limit and request (default: ${GPU_COUNT})
+  --gpu-count N             nvidia.com/gpu limit and request (default: node's GPU_TOTAL_PRESETS)
   --namespace NS            Kubernetes namespace (default: ${NAMESPACE})
   --jupyter-token STR       Server token (default: generate with openssl and print once)
   --dry-run                 Render YAML to stdout only (no kubectl apply)
@@ -113,7 +127,26 @@ if [[ -z "${INSTANCE_TYPE}" ]]; then
   fi
 fi
 
+# Derive resource defaults from presets (flags/env override these)
+GPU_TOTAL="${GPU_TOTAL_PRESETS[$NODE_TYPE_INPUT]:-8}"
+CPU_TOTAL="${CPU_TOTAL_PRESETS[$NODE_TYPE_INPUT]:-192}"
+MEMORY_TOTAL="${MEMORY_TOTAL_PRESETS[$NODE_TYPE_INPUT]:-2000Gi}"
+
+# Request = 80% of total, Limit = 90% of total
+MEMORY_NUM="${MEMORY_TOTAL%Gi}"
+CPU_REQUEST_DEFAULT=$(( CPU_TOTAL * 80 / 100 ))
+CPU_LIMIT_DEFAULT=$(( CPU_TOTAL * 90 / 100 ))
+MEMORY_REQUEST_DEFAULT="$(( MEMORY_NUM * 80 / 100 ))Gi"
+MEMORY_LIMIT_DEFAULT="$(( MEMORY_NUM * 90 / 100 ))Gi"
+
+GPU_COUNT="${GPU_COUNT:-$GPU_TOTAL}"
+CPU_REQUEST="${CPU_REQUEST:-$CPU_REQUEST_DEFAULT}"
+CPU_LIMIT="${CPU_LIMIT:-$CPU_LIMIT_DEFAULT}"
+MEMORY_REQUEST="${MEMORY_REQUEST:-$MEMORY_REQUEST_DEFAULT}"
+MEMORY_LIMIT="${MEMORY_LIMIT:-$MEMORY_LIMIT_DEFAULT}"
+
 echo "==> Instance type (nodeSelector): ${INSTANCE_TYPE}" >&2
+echo "==> Resources: ${GPU_COUNT} GPUs, CPU ${CPU_REQUEST}-${CPU_LIMIT}, Memory ${MEMORY_REQUEST}-${MEMORY_LIMIT}" >&2
 
 if [[ -z "${JUPYTER_TOKEN:-}" ]]; then
   JUPYTER_TOKEN="$(openssl rand -hex 24)"

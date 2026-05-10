@@ -1,0 +1,32 @@
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: {{ JOB_NAME }}
+  namespace: {{ NAMESPACE }}
+spec:
+  runtimeRef:
+    name: {{ RUNTIME_NAME }}
+    kind: TrainingRuntime
+  trainer:
+    image: {{ IMAGE_URI }}
+    command:
+      - torchrun
+    args:
+      - "{{ TRAIN_SCRIPT }}"
+{%- if TRAIN_ARGS is defined and TRAIN_ARGS %}
+{%- for arg in TRAIN_ARGS.split() %}
+      - "{{ arg }}"
+{%- endfor %}
+{%- endif %}
+    numNodes: {{ NUM_NODES }}
+    numProcPerNode: {{ GPU_PER_NODE }}
+    env:
+      - name: HF_TOKEN
+        value: "{{ HF_TOKEN }}"
+    resourcesPerNode:
+      requests:
+        nvidia.com/gpu: "{{ GPU_PER_NODE }}"
+        vpc.amazonaws.com/efa: "{{ EFA_PER_NODE }}"
+      limits:
+        nvidia.com/gpu: "{{ GPU_PER_NODE }}"
+        vpc.amazonaws.com/efa: "{{ EFA_PER_NODE }}"
